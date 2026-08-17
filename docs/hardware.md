@@ -63,9 +63,11 @@ monitor mode for sniffing. Trade-off vs OP-COM path: documented
 implementation task instead of reverse engineering, but Bluetooth instead of
 USB and €100. Buy if the OP-COM RE stalls or app momentum matters more.
 
-### Later: DIY ESP32 dongle (custom PCB, not breadboard-in-a-shell)
+### Later: DIY ESP32 dongle (module-based prototype first, PCB optional)
 
-Deferred until real roof-module traffic is understood. Design notes:
+Deferred until real roof-module traffic is understood. Prototype v1 uses
+off-the-shelf modules only (see sourcing below) — no custom PCB required,
+keeping the build reproducible for other hobbyists. Design notes:
 
 - **ESP32-C3** has exactly **one** CAN controller (TWAI), but pins are
   **freely assignable** via the GPIO matrix (`twai_general_config_t`).
@@ -91,7 +93,23 @@ Deferred until real roof-module traffic is understood. Design notes:
     risk). Runs from 12 V VBAT directly (no regulator needed for it), logic
     pins are 3.3 V-compatible, and it needs the external load resistor on
     the LOAD pin per datasheet/GMLAN app note (also does waveshaping —
-    mandatory). SOIC-8 on a breakout adapter is fine for prototyping.
+    mandatory).
+  - **Ready-made NCV7356 breakout: MikroE "Single Wire CAN Click"
+    (MIKROE-4225)**, ~€20 at Mouser/RS/TME/SparkFun. NCV7356D1R2G with
+    on-board load-resistor circuitry; all modes (Normal / High-Speed /
+    HVWU / Sleep) selectable via MODE0/MODE1 on the mikroBUS header.
+    mikroBUS format but usable standalone: wire TX/RX straight to the
+    ESP32 TWAI GPIOs (the "UART 9600 bps" in MikroE docs is just their
+    demo; 33.3 kbps CAN is within the chip's 40 kbps rating), and MODE0/1
+    to two GPIOs — do not hardwire modes (HVWU needed for ignition-off
+    roof/trunk, Sleep for battery drain). Check schematic for the VBAT
+    (5–27 V) supply input → feed from OBD pin 16.
+
+**Prototype v1 is therefore fully module-based, no custom PCB:** ESP32-C3
+SuperMini + SN65HVD230 module (termination resistor removed) + Single Wire
+CAN Click + small automotive-tolerant buck. Also the recommended
+reproducible setup for other hobbyists (no PCB ordering barrier); the
+custom PCB remains a later optimization, not a prerequisite.
 - C3 pin restrictions (not TWAI-specific): GPIO 11–17 = SPI flash (off
   limits); GPIO 18/19 = USB D−/D+ (keep free for native USB); GPIO 2/8/9 =
   strapping pins (avoid having a transceiver drive them at reset). On a
@@ -109,5 +127,6 @@ Deferred until real roof-module traffic is understood. Design notes:
    develop protocol layer against `ReplayTransport`.
 2. Reverse the OP-COM clone USB protocol → `OpComTransport` over USB OTG.
    Fallback: OBDLink MX+ over Bluetooth (documented ST command set).
-3. Once the required GMLAN traffic is fully understood, design the ESP32-C3
-   custom PCB dongle as its own project.
+3. Once the required GMLAN traffic is understood, build the module-based
+   ESP32-C3 prototype (SuperMini + SN65HVD230 module + Single Wire CAN
+   Click + buck). A custom PCB is a later optimization, not a prerequisite.
