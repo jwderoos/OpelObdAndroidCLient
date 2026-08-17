@@ -56,8 +56,13 @@ class ReplayTransport(
         /** Playback is emitting rx frames (or has not reached a tx entry yet). */
         data object Streaming : Phase
 
-        /** Playback is paused until the client sends [expected]. */
-        data class AwaitingTx(val expected: CanFrame) : Phase {
+        /**
+         * Playback is paused until the client sends [expected]. Deliberately
+         * not a data class: gates for identical frames (a recorded retry, a
+         * periodic tester present) must stay distinguishable, or StateFlow's
+         * equality conflation swallows the second gate and its sender hangs.
+         */
+        class AwaitingTx(val expected: CanFrame) : Phase {
             val released = CompletableDeferred<Unit>()
         }
 
@@ -95,6 +100,10 @@ class ReplayTransport(
                     throw e
                 }
                 gate.released.complete(Unit)
+                // Don't return with the released gate still current: an
+                // immediate next send() would compare against it instead of
+                // the log's next entry.
+                phase.first { it !== gate }
             }
             Phase.Finished -> throw IllegalStateException("send of $frame after the replay script ended")
             Phase.Streaming -> error("unreachable")

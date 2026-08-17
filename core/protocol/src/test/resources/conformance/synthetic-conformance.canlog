@@ -1,0 +1,25 @@
+# ooc-canlog v1
+# note: synthetic conformance fixture; hand-written, no vehicle data
+
+# raw (non-ISO-TP) all-nodes tester present
+0 tx 101 fe 01 3e 00 00 00 00 00
+
+# unanswered presence poll on an absent ECU
+0 tx 242 01 20 00 00 00 00 00 00
+
+# single-frame request, multi-frame response with tester flow control
+0 tx 241 02 1a 90 00 00 00 00 00
+# periodic broadcast noise the stack must ignore
+0 rx 541 02 0f 00 00 00 00 00 00
+0 rx 641 10 0a 5a 90 41 42 43 44
+0 tx 241 30 00 00 00 00 00 00 00
+0 rx 641 21 45 46 47 48 00 00 00
+
+# multi-frame request on a second ECU, single-frame response
+0 tx 7e0 10 09 3b 99 01 02 03 04
+0 rx 7e8 30 00 00 00 00 00 00 00
+0 tx 7e0 21 05 06 07 00 00 00 00
+0 rx 7e8 01 7b 00 00 00 00 00 00
+
+# unsolicited extra response message on the first ECU's diagnostic id
+0 rx 641 02 5a 99 00 00 00 00 00
