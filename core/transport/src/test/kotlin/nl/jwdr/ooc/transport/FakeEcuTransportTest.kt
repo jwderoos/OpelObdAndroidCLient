@@ -177,6 +177,29 @@ class FakeEcuTransportTest {
     }
 
     @Test
+    fun `staggered responses arrive each after their own delay`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        val pending = CanFrame(0x7E8, byteArrayOf(0x03, 0x7F, 0x10, 0x78))
+        transport.onFrame(request).respondWith(
+            0.milliseconds to pending,
+            200.milliseconds to response,
+        )
+        transport.connect()
+
+        val collected = mutableListOf<CanFrame>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            transport.incomingFrames.toList(collected)
+        }
+        transport.send(request)
+
+        assertEquals(listOf(pending), collected)
+
+        advanceTimeBy(201.milliseconds)
+        assertEquals(listOf(pending, response), collected)
+        job.cancel()
+    }
+
+    @Test
     fun `late collector still receives earlier responses via replay`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
         transport.onFrame(request).respondWith(response)

@@ -71,16 +71,21 @@ class FakeEcuTransport(
         private val predicate: (CanFrame) -> Boolean,
     ) {
         /** Responds immediately with [frames], in order. */
-        fun respondWith(vararg frames: CanFrame) = respondWith(frames.toList())
+        fun respondWith(vararg frames: CanFrame) = respondWith(frames.toList(), Duration.ZERO)
 
         /** Responds with [frames] in order, after an optional artificial [delay]. */
         fun respondWith(frames: List<CanFrame>, delay: Duration = Duration.ZERO) {
-            rules += Rule(predicate, frames, delay)
+            rules += Rule(predicate, frames.map { delay to it })
+        }
+
+        /** Responds with each frame after its own delay, measured from the request. */
+        fun respondWith(vararg timedFrames: Pair<Duration, CanFrame>) {
+            rules += Rule(predicate, timedFrames.toList())
         }
 
         /** Explicitly consumes matching requests without responding (timeout tests). */
         fun respondNothing() {
-            rules += Rule(predicate, emptyList(), Duration.ZERO)
+            rules += Rule(predicate, emptyList())
         }
     }
 
@@ -104,22 +109,21 @@ class FakeEcuTransport(
         _sentFrames += frame
 
         val rule = rules.firstOrNull { it.predicate(frame) } ?: return
-        if (rule.responses.isEmpty()) return
-
-        if (rule.delay == Duration.ZERO) {
-            rule.responses.forEach { _incomingFrames.tryEmit(it) }
-        } else {
-            pendingResponses += scope.launch {
-                delay(rule.delay)
-                rule.responses.forEach { _incomingFrames.tryEmit(it) }
+        for ((delay, response) in rule.responses) {
+            if (delay == Duration.ZERO) {
+                _incomingFrames.tryEmit(response)
+            } else {
+                pendingResponses += scope.launch {
+                    delay(delay)
+                    _incomingFrames.tryEmit(response)
+                }
             }
         }
     }
 
     private class Rule(
         val predicate: (CanFrame) -> Boolean,
-        val responses: List<CanFrame>,
-        val delay: Duration,
+        val responses: List<Pair<Duration, CanFrame>>,
     )
 
     private companion object {
