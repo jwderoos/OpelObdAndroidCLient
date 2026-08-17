@@ -9,7 +9,6 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,9 +49,11 @@ class FakeEcuTransportTest {
     fun `send before connect throws`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
 
-        assertThrows(IllegalStateException::class.java) {
-            runTest { transport.send(request) }
-        }
+        // Nested runTest itself throws IllegalStateException, so the throw
+        // must be caught inside the test coroutine to assert anything real.
+        val e = runCatching { transport.send(request) }.exceptionOrNull()
+
+        assertTrue("expected IllegalStateException, got $e", e is IllegalStateException)
     }
 
     @Test
@@ -207,9 +208,8 @@ class FakeEcuTransportTest {
         transport.disconnect()
 
         assertEquals(ConnectionState.Disconnected, transport.state.value)
-        assertThrows(IllegalStateException::class.java) {
-            runTest { transport.send(request) }
-        }
+        val e = runCatching { transport.send(request) }.exceptionOrNull()
+        assertTrue("expected IllegalStateException, got $e", e is IllegalStateException)
     }
 
     @Test

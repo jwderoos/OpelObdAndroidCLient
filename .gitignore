@@ -13,3 +13,6 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+
+# Recorded real-vehicle CAN logs stay local (see docs/formats/canlog.md)
+/logs/

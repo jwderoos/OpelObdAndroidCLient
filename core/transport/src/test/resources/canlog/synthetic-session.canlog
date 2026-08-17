@@ -1,0 +1,18 @@
+# ooc-canlog v1
+# vehicle: synthetic
+# adapter: none (hand-written sample)
+# note: KWP2000-over-CAN shaped exchange, ids and payloads are made up
+
+# Wake-up broadcast from the bus
+0 rx 100 01
+
+# Tester starts a diagnostic session (single frame)
+100 tx 246 02 10 92
+112 rx 646 02 50 92
+
+# Tester requests a data block; ECU answers multi-frame (first + consecutive)
+250 tx 246 02 21 05
+261 rx 646 10 0E 61 05 00 11 22 33
+266 tx 246 30 00 00
+271 rx 646 21 44 55 66 77 88 99 AA
+276 rx 646 22 BB CC 00 00 00 00 00
