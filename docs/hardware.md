@@ -112,6 +112,22 @@ Re-render after edits with `uvx wireviz docs/hardware/wiring.yml`
 (needs `brew install graphviz`). GPIO plan and firmware notes are in the
 YAML header comments.
 
+**USB support:** the C3's native USB (GPIO18/19, the SuperMini USB-C port)
+enumerates as a fixed-function CDC serial device — works directly with
+`usb-serial-for-android` over OTG, so the firmware can offer both BLE and
+USB transports. ⚠ Dual-supply gotcha: with the buck on the 5 V pin *and* a
+phone supplying OTG VBUS, add a Schottky diode between buck output and the
+5 V pin (many SuperMini clones tie VBUS straight to 5 V — verify) to avoid
+back-feeding the phone.
+
+**Charging the phone from the dongle: rejected for v1.** Phone-as-OTG-host
+sources VBUS by default; reversing that needs USB-C PD power-role swap (PD
+source controller + firmware + cooperative phone) — a sub-project that
+kills the cheap/reproducible goal. Instead: (a) BLE for data + normal car
+charger, or (b) wired data + charging via a PD-powered USB-C hub between
+phone and dongle (car PD adapter feeds the hub; dongle stays a dumb CDC
+device). Revisit PD sourcing only at the custom-PCB stage, if ever.
+
 **Prototype v1 is therefore fully module-based, no custom PCB:** ESP32-C3
 SuperMini + SN65HVD230 module (termination resistor removed) + Single Wire
 CAN Click + small automotive-tolerant buck. Also the recommended

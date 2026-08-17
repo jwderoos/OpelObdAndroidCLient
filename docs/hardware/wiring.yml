@@ -22,8 +22,15 @@ connectors:
     pinlabels: [IN+, IN-, OUT+, OUT-]
   ESP:
     type: ESP32-C3 SuperMini
-    notes: Native USB (GPIO18/19) kept free for flashing/logging.
+    notes: |
+      USB-C port (native USB, GPIO18/19) = CDC serial transport to phone via
+      OTG, plus flashing/logging. Verify whether the board ties USB VBUS
+      straight to the 5V pin; D1 protects the phone from buck back-feed.
     pinlabels: [VIN-5V, GND, OUT-3V3, GPIO4-HS-TX, GPIO5-HS-RX, GPIO6-SW-TX, GPIO7-SW-RX, GPIO20-M0, GPIO21-M1]
+  D1:
+    type: Schottky diode (e.g. SS34)
+    pinlabels: [A, K]
+    notes: Anode at buck. Blocks 5V back-feed into phone OTG VBUS.
   HS:
     type: SN65HVD230 module (3.3V)
     notes: REMOVE onboard 120R termination resistor before in-car use.
@@ -43,6 +50,11 @@ cables:
   W-5V:
     colors: [RD, BK]
     category: bundle
+    notes: 5V feed, +5V runs via D1
+  W-5V-K:
+    colors: [RD]
+    category: bundle
+    notes: D1 cathode to ESP 5V pin
   W-HS-LOGIC:
     colors: [OG, BK, YE, GN]
     category: bundle
@@ -62,9 +74,15 @@ connections:
   - - OBD: [16, 4]
     - W-PWR: [1, 2]
     - BUCK: [IN+, IN-]
-  - - BUCK: [OUT+, OUT-]
-    - W-5V: [1, 2]
-    - ESP: [VIN-5V, GND]
+  - - BUCK: [OUT+]
+    - W-5V: [1]
+    - D1: [A]
+  - - BUCK: [OUT-]
+    - W-5V: [2]
+    - ESP: [GND]
+  - - D1: [K]
+    - W-5V-K: [1]
+    - ESP: [VIN-5V]
   - - ESP: [OUT-3V3, GND, GPIO4-HS-TX, GPIO5-HS-RX]
     - W-HS-LOGIC: [1, 2, 3, 4]
     - HS: [VCC-3V3, GND, CTX, CRX]
