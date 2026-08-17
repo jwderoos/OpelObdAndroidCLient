@@ -1,0 +1,79 @@
+# OpelOBDClient — prototype v1 wiring (module-based, no custom PCB)
+# Render with: wireviz wiring.yml   (needs graphviz; `brew install graphviz`, `uv tool install wireviz`)
+# See docs/hardware.md for rationale. TODOs below must be verified against the
+# MikroE Single Wire CAN Click schematic before soldering.
+#
+# GPIO plan (ESP32-C3 SuperMini, TWAI retargeted at runtime between buses):
+#   HS-CAN  : TX=GPIO4, RX=GPIO5   (500 kbps, SN65HVD230)
+#   SW-CAN  : TX=GPIO6, RX=GPIO7   (33.3 kbps, NCV7356 Click)
+#   SW mode : M0=GPIO20, M1=GPIO21 (Normal / High-Speed / HVWU / Sleep)
+# Firmware note: hold the *inactive* bus's TX GPIO high (recessive) while the
+# TWAI driver is attached to the other pair — the cheap SN65HVD230 module ties
+# Rs low (always-on), it has no standby pin.
+
+connectors:
+  OBD:
+    type: J1962 male (OBD2 plug)
+    notes: Vehicle side. Pin 16 is battery-hot — sleep strategy required.
+    pinlabels: [SW-CAN, CHASSIS-GND, SIGNAL-GND, HS-CAN-H, HS-CAN-L, VBAT-12V]
+    pins: [1, 4, 5, 6, 14, 16]
+  BUCK:
+    type: Buck 12V to 5V (automotive-tolerant input)
+    pinlabels: [IN+, IN-, OUT+, OUT-]
+  ESP:
+    type: ESP32-C3 SuperMini
+    notes: Native USB (GPIO18/19) kept free for flashing/logging.
+    pinlabels: [VIN-5V, GND, OUT-3V3, GPIO4-HS-TX, GPIO5-HS-RX, GPIO6-SW-TX, GPIO7-SW-RX, GPIO20-M0, GPIO21-M1]
+  HS:
+    type: SN65HVD230 module (3.3V)
+    notes: REMOVE onboard 120R termination resistor before in-car use.
+    pinlabels: [VCC-3V3, GND, CTX, CRX, CANH, CANL]
+  SW:
+    type: Single Wire CAN Click (MIKROE-4225, NCV7356)
+    notes: |
+      TODO verify against Click schematic: exact mikroBUS pins for M0/M1,
+      and where the 5-27V transceiver supply (VBAT) enters the board.
+    pinlabels: [VCC-3V3, GND, TX, RX, M0, M1, CANH-SW, VBAT]
+
+cables:
+  W-PWR:
+    colors: [RD, BK]
+    category: bundle
+    notes: 12V feed
+  W-5V:
+    colors: [RD, BK]
+    category: bundle
+  W-HS-LOGIC:
+    colors: [OG, BK, YE, GN]
+    category: bundle
+  W-SW-LOGIC:
+    colors: [OG, BK, YE, GN, BU, VT]
+    category: bundle
+  W-HS-BUS:
+    colors: [WH, BN]
+    category: bundle
+    notes: Twist CANH/CANL
+  W-SW-BUS:
+    colors: [GY, RD]
+    category: bundle
+    notes: SW-CAN single wire (signal returns via chassis GND) + 12V VBAT to Click
+
+connections:
+  - - OBD: [16, 4]
+    - W-PWR: [1, 2]
+    - BUCK: [IN+, IN-]
+  - - BUCK: [OUT+, OUT-]
+    - W-5V: [1, 2]
+    - ESP: [VIN-5V, GND]
+  - - ESP: [OUT-3V3, GND, GPIO4-HS-TX, GPIO5-HS-RX]
+    - W-HS-LOGIC: [1, 2, 3, 4]
+    - HS: [VCC-3V3, GND, CTX, CRX]
+  - - ESP: [OUT-3V3, GND, GPIO6-SW-TX, GPIO7-SW-RX, GPIO20-M0, GPIO21-M1]
+    - W-SW-LOGIC: [1, 2, 3, 4, 5, 6]
+    - SW: [VCC-3V3, GND, TX, RX, M0, M1]
+  - - HS: [CANH, CANL]
+    - W-HS-BUS: [1, 2]
+    - OBD: [6, 14]
+  - - SW: [CANH-SW, VBAT]
+    - W-SW-BUS: [1, 2]
+    - OBD: [1, 16]

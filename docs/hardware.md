@@ -105,6 +105,13 @@ keeping the build reproducible for other hobbyists. Design notes:
     roof/trunk, Sleep for battery drain). Check schematic for the VBAT
     (5–27 V) supply input → feed from OBD pin 16.
 
+**Wiring diagram:** maintained as WireViz source in
+[`hardware/wiring.yml`](hardware/wiring.yml) (rendered:
+[`hardware/wiring.svg`](hardware/wiring.svg) + BOM `wiring.bom.tsv`).
+Re-render after edits with `uvx wireviz docs/hardware/wiring.yml`
+(needs `brew install graphviz`). GPIO plan and firmware notes are in the
+YAML header comments.
+
 **Prototype v1 is therefore fully module-based, no custom PCB:** ESP32-C3
 SuperMini + SN65HVD230 module (termination resistor removed) + Single Wire
 CAN Click + small automotive-tolerant buck. Also the recommended

@@ -1,0 +1,16 @@
+Id	Description	Qty	Unit	Designators
+1	Connector, Buck 12V to 5V (automotive-tolerant input), 4 pins	1		BUCK
+2	Connector, ESP32-C3 SuperMini, 9 pins	1		ESP
+3	Connector, J1962 male (OBD2 plug), 6 pins	1		OBD
+4	Connector, SN65HVD230 module (3.3V), 6 pins	1		HS
+5	Connector, Single Wire CAN Click (MIKROE-4225, NCV7356), 8 pins	1		SW
+6	Wire, BK	0	m	W-5V, W-HS-LOGIC, W-PWR, W-SW-LOGIC
+7	Wire, BN	0	m	W-HS-BUS
+8	Wire, BU	0	m	W-SW-LOGIC
+9	Wire, GN	0	m	W-HS-LOGIC, W-SW-LOGIC
+10	Wire, GY	0	m	W-SW-BUS
+11	Wire, OG	0	m	W-HS-LOGIC, W-SW-LOGIC
+12	Wire, RD	0	m	W-5V, W-PWR, W-SW-BUS
+13	Wire, VT	0	m	W-SW-LOGIC
+14	Wire, WH	0	m	W-HS-BUS
+15	Wire, YE	0	m	W-HS-LOGIC, W-SW-LOGIC
