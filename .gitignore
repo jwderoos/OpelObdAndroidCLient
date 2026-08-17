@@ -16,3 +16,5 @@ local.properties
 
 # Recorded real-vehicle CAN logs stay local (see docs/formats/canlog.md)
 /logs/
+# Raw OP-COM debug captures stay local (see docs/formats/opcom-debug-capture.md)
+/DebugFiles/

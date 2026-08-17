@@ -62,6 +62,7 @@ number — never silently skipped.
 ## Provenance note
 
 The format is intentionally **not** based on OP-COM's own debug files —
-those are zlib-compressed, undocumented, vendor-internal structures. A
-local-only converter from such recordings into ooc-canlog is future work
-under issue #7.
+those are zlib-compressed, vendor-internal structures (documented in
+[opcom-debug-capture.md](opcom-debug-capture.md)). The local-only converter
+is `tools/opcom-debug-to-canlog.py`; converted logs go to git-ignored
+`/logs/`.
