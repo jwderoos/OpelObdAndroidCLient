@@ -36,6 +36,10 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:transport"))
+    implementation(project(":core:protocol"))
+    implementation(project(":core:catalog"))
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

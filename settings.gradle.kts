@@ -24,3 +24,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "Opel OBD Client"
 include(":app")
+include(":core:transport")
+include(":core:protocol")
+include(":core:catalog")
