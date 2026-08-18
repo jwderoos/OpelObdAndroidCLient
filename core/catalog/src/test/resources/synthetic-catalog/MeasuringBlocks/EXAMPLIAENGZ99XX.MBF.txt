@@ -1,0 +1,25 @@
+; Examplia-A
+; Examplia-A Engine Z 99 XX
+##MB01=Diagnostic Data List 1
+[begin]
+MEASDATA=04,03,10,
+DISABLE_ALL
+ENABLE_RANGE=0002-0004
+[end]
+
+##MB02=Engine Oil Status
+[begin]
+MEASDATA=04,05
+DISABLE_ALL
+ENABLE_RANGE=0005-0006
+[end]
+
+ID=00105
+
+[MEASURING BLOCK DATA]
+ECM Odometer Value,string,[km]
+Coolant Temperature,string,[°C]
+Fuel Pump Relay,string,Inactive,Active,**TAG1**
+Battery Voltage,string,[V],**TAG2**
+Engine Oil Change Warning,string,Inactive,Active
+Remaining Oil Life,string,[%]

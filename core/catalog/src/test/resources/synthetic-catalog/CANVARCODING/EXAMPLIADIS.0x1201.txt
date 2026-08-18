@@ -1,0 +1,11 @@
+;Examplia-A, DIS Variant, 0x1201
+;
+[DID_begin]
+44,07
+4C,04
+[DID_end]
+
+[VARIANT CODING DATA]
+Language,string,German,English,Spanish
+Board Computer,string,Not Present,Present
+Check Control,string,Not Present,Present,**DISABLED**,**DISABLED**

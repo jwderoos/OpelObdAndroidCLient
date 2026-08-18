@@ -1,0 +1,11 @@
+; synthetic fixture - hand-written for tests, no vendor data
+;==============================================================================
+;                               2 0 1 0
+;==============================================================================
+2010 (A)	Examplia-A	Vehicle	Car Identification	Car Identification	CAN	IDENT
+2010 (A)	Examplia-A	Engine	Z 99 XX	Motronic X	CAN	HSCAN	0500.0	0x000007E0	0x000005E8	0x000007E8	EXAMPLIAENGZ99XX
+2010 (A)	Examplia-A	Chassis	ABS/ESP	ABS/ESP	CAN	HSCAN	0500.0	0x00000243	0x00000543	0x00000643	EXAMPLIAABSESP
+2010 (A)	Examplia-A	Infotainment System	DIS	DIS	CAN	MSCAN	0095.6	0x00000246	0x00000546	0x00000646	EXAMPLIADIS
+2010 (A)	Examplia-A	Body	Central Door Lock	Central Door Lock	CAN	VIRTUAL	0000.0	0x00000000	0x00000000	0x00000000	????
+2010 (A)	Examplia-A	Body	Airbag	Airbag	KW2000	10400	EXAMPLIASRS	7	89	3
+2010 (A)	Examplia-A	Car Identification	Car Identification	Car Identification	IDENTKW2000

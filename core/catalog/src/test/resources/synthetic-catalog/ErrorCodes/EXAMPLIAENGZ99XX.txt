@@ -1,0 +1,10 @@
+;KWCAN
+;CarType=3
+;
+; ID=0X0A35
+[MB]	EXAMPLIAENGZ99XX
+P0016
+-00	Crankshaft/Camshaft Correlation
+B1000
+-01	Example Symptom One
+-02	Example Symptom Two
