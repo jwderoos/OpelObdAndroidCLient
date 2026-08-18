@@ -10,11 +10,21 @@ data class CatalogEntity(
     val label: String,
     val sourceHash: String,
     val importedAtEpochMillis: Long,
+    // The vehicle the user works on; lives on the catalog row so re-import
+    // (which replaces the row) can never leave a stale selection behind.
+    val selectedModelYear: String? = null,
+    val selectedVehicle: String? = null,
 ) {
     companion object {
         const val SINGLETON_ID = 1L
     }
 }
+
+/** One selectable vehicle of the catalog: a distinct model year + name pair. */
+data class VehicleRef(
+    val modelYear: String,
+    val vehicle: String,
+)
 
 /** Flattened [nl.jwdr.ooc.catalog.EcuDefinition] row. */
 @Entity(tableName = "ecus")

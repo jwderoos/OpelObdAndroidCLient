@@ -18,6 +18,18 @@ interface CatalogDao {
     @Query("SELECT * FROM ecus WHERE catalogKey = :catalogKey")
     suspend fun ecusByCatalogKey(catalogKey: String): List<EcuEntity>
 
+    @Query("SELECT DISTINCT modelYear, vehicle FROM ecus ORDER BY modelYear, vehicle")
+    fun observeVehicles(): Flow<List<VehicleRef>>
+
+    @Query(
+        "SELECT * FROM ecus WHERE modelYear = :modelYear AND vehicle = :vehicle " +
+            "AND addressType = 'CAN' ORDER BY name",
+    )
+    suspend fun canEcusForVehicle(modelYear: String, vehicle: String): List<EcuEntity>
+
+    @Query("UPDATE catalogs SET selectedModelYear = :modelYear, selectedVehicle = :vehicle")
+    suspend fun updateSelectedVehicle(modelYear: String?, vehicle: String?)
+
     @Query("SELECT * FROM catalog_files WHERE kind = :kind AND fileKey = :fileKey")
     suspend fun filesFor(kind: String, fileKey: String): List<CatalogFileEntity>
 

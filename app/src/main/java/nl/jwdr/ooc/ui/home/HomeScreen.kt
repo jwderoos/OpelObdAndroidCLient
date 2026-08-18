@@ -43,8 +43,7 @@ fun HomeScreen(
         ConnectionCard(connectionState, onToggleConnection)
 
         Button(
-            onClick = { /* implemented by the ECU scan issue (#11) */ },
-            enabled = false,
+            onClick = { onNavigate(Route.EcuList(autoScan = true)) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(R.string.action_scan_all))

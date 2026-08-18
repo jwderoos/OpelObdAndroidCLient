@@ -254,4 +254,34 @@ class FakeEcuTransportTest {
         assertTrue(collected.isEmpty())
         job.cancel()
     }
+
+    @Test
+    fun `respondBy computes the response frames from the request`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onMatch { it.data[1] == 0x10.toByte() }
+            .respondBy { request -> listOf(CanFrame(request.id + 8, byteArrayOf(0x02, 0x50, request.data[2]))) }
+        transport.connect()
+
+        transport.send(request)
+
+        assertEquals(response, transport.incomingFrames.first())
+    }
+
+    @Test
+    fun `respondBy returning no frames leaves the request unanswered`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onId(0x7E0).respondBy { emptyList() }
+        transport.connect()
+
+        transport.send(request)
+
+        val collected = mutableListOf<CanFrame>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            transport.incomingFrames.toList(collected)
+        }
+        advanceUntilIdle()
+
+        assertTrue(collected.isEmpty())
+        job.cancel()
+    }
 }

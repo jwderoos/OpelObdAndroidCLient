@@ -1,6 +1,18 @@
 package nl.jwdr.ooc.diagnostics
 
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flow
+import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
+import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
+import nl.jwdr.ooc.protocol.session.DiagnosticSession
+import nl.jwdr.ooc.protocol.session.SessionConfig
+import nl.jwdr.ooc.protocol.session.SessionException
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
@@ -30,4 +42,60 @@ class DiagnosticsManager(
     suspend fun connect() = transport.connect()
 
     suspend fun disconnect() = transport.disconnect()
+
+    /**
+     * Probes each target sequentially (one bus, one request in flight) and
+     * emits one [EcuScanResult] per target, in order. Fails with a
+     * [nl.jwdr.ooc.protocol.session.SessionException.TransportLost] when the
+     * connection drops mid-scan.
+     */
+    fun scanEcus(targets: List<EcuScanTarget>): Flow<EcuScanResult> = flow {
+        for (target in targets) {
+            emit(EcuScanResult(target, probe(target)))
+        }
+    }
+
+    private suspend fun probe(target: EcuScanTarget): EcuScanStatus {
+        // DiagnosticSession needs a real scope for its collector coroutines;
+        // an inline coroutineScope would never return while they run.
+        val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
+        try {
+            val session = DiagnosticSession(
+                transport,
+                IsoTpAddress(target.requestId, target.responseId),
+                config = SCAN_SESSION_CONFIG,
+                scope = sessionScope,
+            )
+            try {
+                val response = session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL))
+                return EcuScanStatus.Present(dtcCount = response.dtcs.size)
+            } catch (e: SessionException.NegativeResponse) {
+                // It answered, so it exists; it just won't report DTCs this way.
+                return EcuScanStatus.Present(dtcCount = null)
+            } catch (e: SessionException.ResponseTimeout) {
+                return EcuScanStatus.Absent
+            } finally {
+                session.close()
+            }
+        } finally {
+            sessionScope.cancel()
+        }
+    }
+
+    private companion object {
+        /** readDTCByStatus sub-function: all identified DTCs. */
+        const val DTC_STATUS_ALL = 0x02
+
+        /** groupOfDTC covering all groups. */
+        const val DTC_GROUP_ALL = 0xFF00
+
+        /**
+         * Probe policy: silence means absent, so don't retry, and don't wait
+         * the full conversational timeout per empty address.
+         */
+        val SCAN_SESSION_CONFIG = SessionConfig(
+            responseTimeout = 500.milliseconds,
+            maxRetries = 0,
+        )
+    }
 }

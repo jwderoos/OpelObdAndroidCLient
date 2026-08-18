@@ -75,17 +75,23 @@ class FakeEcuTransport(
 
         /** Responds with [frames] in order, after an optional artificial [delay]. */
         fun respondWith(frames: List<CanFrame>, delay: Duration = Duration.ZERO) {
-            rules += Rule(predicate, frames.map { delay to it })
+            rules += Rule(predicate) { frames.map { delay to it } }
         }
 
         /** Responds with each frame after its own delay, measured from the request. */
         fun respondWith(vararg timedFrames: Pair<Duration, CanFrame>) {
-            rules += Rule(predicate, timedFrames.toList())
+            val responses = timedFrames.toList()
+            rules += Rule(predicate) { responses }
         }
 
         /** Explicitly consumes matching requests without responding (timeout tests). */
         fun respondNothing() {
-            rules += Rule(predicate, emptyList())
+            rules += Rule(predicate) { emptyList() }
+        }
+
+        /** Computes the response frames from the request; empty means no answer. */
+        fun respondBy(transform: (CanFrame) -> List<CanFrame>) {
+            rules += Rule(predicate) { request -> transform(request).map { Duration.ZERO to it } }
         }
     }
 
@@ -109,7 +115,7 @@ class FakeEcuTransport(
         _sentFrames += frame
 
         val rule = rules.firstOrNull { it.predicate(frame) } ?: return
-        for ((delay, response) in rule.responses) {
+        for ((delay, response) in rule.respond(frame)) {
             if (delay == Duration.ZERO) {
                 _incomingFrames.tryEmit(response)
             } else {
@@ -123,7 +129,7 @@ class FakeEcuTransport(
 
     private class Rule(
         val predicate: (CanFrame) -> Boolean,
-        val responses: List<Pair<Duration, CanFrame>>,
+        val respond: (CanFrame) -> List<Pair<Duration, CanFrame>>,
     )
 
     private companion object {

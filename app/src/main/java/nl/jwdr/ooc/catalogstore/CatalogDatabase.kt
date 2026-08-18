@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [CatalogEntity::class, EcuEntity::class, CatalogFileEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class CatalogDatabase : RoomDatabase() {
@@ -24,7 +24,11 @@ abstract class CatalogDatabase : RoomDatabase() {
                     context.applicationContext,
                     CatalogDatabase::class.java,
                     "catalog.db",
-                ).build().also { instance = it }
+                )
+                    // The catalog is a re-importable cache; dropping it on a
+                    // schema change beats maintaining migrations pre-release.
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build().also { instance = it }
             }
     }
 }

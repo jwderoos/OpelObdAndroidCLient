@@ -1,0 +1,201 @@
+package nl.jwdr.ooc.ui.ecus
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import nl.jwdr.ooc.R
+import nl.jwdr.ooc.catalogstore.CatalogEntity
+import nl.jwdr.ooc.catalogstore.CatalogPayload
+import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.EcuEntity
+import nl.jwdr.ooc.catalogstore.FakeCatalogDao
+import nl.jwdr.ooc.catalogstore.VehicleRef
+import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.transport.CanFrame
+import nl.jwdr.ooc.transport.ConnectionState
+import nl.jwdr.ooc.transport.FakeEcuTransport
+import nl.jwdr.ooc.transport.ObdTransport
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class EcuListViewModelTest {
+
+    private val dispatcher = StandardTestDispatcher()
+    private val dao = FakeCatalogDao()
+    private val repository = CatalogRepository(dao, clock = { 1234L })
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    private fun viewModel(transport: ObdTransport) =
+        EcuListViewModel(repository, DiagnosticsManager(transport))
+
+    private val pad = 0xAA.toByte()
+
+    private fun bytes(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
+
+    private fun frame(id: Int, vararg values: Int): CanFrame {
+        val data = bytes(*values)
+        return CanFrame(id, if (data.size < 8) data + ByteArray(8 - data.size) { pad } else data)
+    }
+
+    private fun canEcu(name: String, requestId: Int) = EcuEntity(
+        catalogId = CatalogEntity.SINGLETON_ID,
+        modelYear = "2005",
+        vehicle = "Astra-H",
+        groupName = "Body",
+        name = name,
+        systemName = "$name system",
+        protocol = "CAN",
+        builtinFunction = null,
+        catalogKey = null,
+        addressType = "CAN",
+        canBus = "HSCAN",
+        bitRateTenthsKbps = 5000,
+        requestId = requestId,
+        secondaryId = 0,
+        responseId = requestId + 8,
+        baudRate = null,
+        klineAddress = null,
+        initType = null,
+        extra = null,
+    )
+
+    private suspend fun storeCatalog(vararg ecus: EcuEntity) {
+        dao.replaceCatalog(
+            CatalogPayload(
+                catalog = CatalogEntity(label = "test", sourceHash = "h", importedAtEpochMillis = 1L),
+                ecus = ecus.toList(),
+                files = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun `without a catalog the screen asks for an import`() = runTest(dispatcher) {
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(EcuListUiState.NoCatalog, viewModel.state.value)
+    }
+
+    @Test
+    fun `with a catalog but no selection the screen offers the vehicle picker`() = runTest(dispatcher) {
+        storeCatalog(canEcu("Engine", 0x7E0))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            EcuListUiState.PickVehicle(listOf(VehicleRef("2005", "Astra-H"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting a vehicle shows its CAN ECUs, not yet scanned`() = runTest(dispatcher) {
+        storeCatalog(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertEquals(VehicleRef("2005", "Astra-H"), state.vehicle)
+        assertFalse(state.scanning)
+        assertEquals(
+            listOf(
+                EcuRow("ABS", "ABS system", EcuRowStatus.NotScanned),
+                EcuRow("Engine", "Engine system", EcuRowStatus.NotScanned),
+            ),
+            state.rows,
+        )
+    }
+
+    @Test
+    fun `a scan connects if needed and reports presence and fault status per ECU`() = runTest(dispatcher) {
+        storeCatalog(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0))
+        val transport = FakeEcuTransport(backgroundScope)
+        // ABS answers with one DTC; the engine address stays silent.
+        transport.onFrame(frame(0x241, 0x04, 0x18, 0x02, 0xFF, 0x00))
+            .respondWith(frame(0x249, 0x05, 0x58, 0x01, 0x01, 0x70, 0xE1))
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.startScan()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(ConnectionState.Ready, transport.state.value)
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertFalse(state.scanning)
+        assertNull(state.error)
+        assertEquals(
+            listOf(
+                EcuRow("ABS", "ABS system", EcuRowStatus.Present(dtcCount = 1)),
+                EcuRow("Engine", "Engine system", EcuRowStatus.Absent),
+            ),
+            state.rows,
+        )
+    }
+
+    @Test
+    fun `a scan failure surfaces a user-readable error and stops scanning`() = runTest(dispatcher) {
+        storeCatalog(canEcu("Engine", 0x7E0))
+        val broken = object : ObdTransport {
+            override val state: StateFlow<ConnectionState> =
+                MutableStateFlow(ConnectionState.Ready)
+            override val incomingFrames: Flow<CanFrame> = emptyFlow()
+            override suspend fun connect() = Unit
+            override suspend fun disconnect() = Unit
+            override suspend fun send(frame: CanFrame) =
+                throw IllegalStateException("bus gone")
+        }
+        val viewModel = viewModel(broken)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.startScan()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertFalse(state.scanning)
+        assertEquals(R.string.error_transport_lost, state.error!!.resId)
+    }
+
+    @Test
+    fun `changing the vehicle returns to the picker`() = runTest(dispatcher) {
+        storeCatalog(canEcu("Engine", 0x7E0))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.changeVehicle()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(viewModel.state.value is EcuListUiState.PickVehicle)
+    }
+}

@@ -14,8 +14,9 @@ sealed interface Route {
     @Serializable
     data object Home : Route
 
+    /** @param autoScan start a bus scan on arrival (home's "scan all ECUs"). */
     @Serializable
-    data object EcuList : Route
+    data class EcuList(val autoScan: Boolean = false) : Route
 
     @Serializable
     data object FaultCodes : Route
@@ -34,7 +35,7 @@ sealed interface Route {
 
     companion object {
         val all: List<Route> =
-            listOf(Home, EcuList, FaultCodes, LiveData, OutputTests, Coding, Settings)
+            listOf(Home, EcuList(), FaultCodes, LiveData, OutputTests, Coding, Settings)
     }
 }
 
@@ -46,7 +47,7 @@ data class HomeMenuItem(
 
 /** The home hub's feature entries, in diagnostic workflow order. */
 val HOME_MENU: List<HomeMenuItem> = listOf(
-    HomeMenuItem(R.string.screen_ecu_list, Route.EcuList),
+    HomeMenuItem(R.string.screen_ecu_list, Route.EcuList()),
     HomeMenuItem(R.string.screen_fault_codes, Route.FaultCodes),
     HomeMenuItem(R.string.screen_live_data, Route.LiveData),
     HomeMenuItem(R.string.screen_output_tests, Route.OutputTests),
