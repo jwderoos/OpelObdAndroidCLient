@@ -39,7 +39,7 @@ fun FaultCodesScreen(
 
     when (val current = state) {
         FaultCodesUiState.Loading -> Unit
-        FaultCodesUiState.NoVehicle -> NoVehicle(onOpenEcuList)
+        FaultCodesUiState.NoVehicle -> NoVehicle(onOpenEcuList, viewModel::useObd2)
         is FaultCodesUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
         is FaultCodesUiState.Faults -> {
             FaultList(
@@ -91,7 +91,7 @@ private fun ClearConfirmationDialog(
 }
 
 @Composable
-private fun NoVehicle(onOpenEcuList: () -> Unit) {
+private fun NoVehicle(onOpenEcuList: () -> Unit, onUseObd2: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -106,6 +106,9 @@ private fun NoVehicle(onOpenEcuList: () -> Unit) {
         )
         Button(onClick = onOpenEcuList) {
             Text(stringResource(R.string.action_open_ecu_list))
+        }
+        TextButton(onClick = onUseObd2) {
+            Text(stringResource(R.string.action_use_obd2))
         }
     }
 }

@@ -332,4 +332,85 @@ class FaultCodesViewModelTest {
             viewModel.state.value,
         )
     }
+
+    // Generic OBD-II fallback (#14)
+
+    private fun obd2Transport(scope: kotlinx.coroutines.CoroutineScope): FakeEcuTransport {
+        val transport = FakeEcuTransport(scope)
+        // Functional probe: one ECU answers.
+        transport.onFrame(frame(0x7DF, 0x02, 0x01, 0x00))
+            .respondWith(frame(0x7E8, 0x06, 0x41, 0x00, 0x08, 0x10, 0x00, 0x00))
+        var cleared = false
+        transport.onFrame(frame(0x7E0, 0x01, 0x04)).respondBy {
+            cleared = true
+            listOf(frame(0x7E8, 0x01, 0x44))
+        }
+        transport.onFrame(frame(0x7E0, 0x01, 0x03)).respondBy {
+            if (cleared) {
+                listOf(frame(0x7E8, 0x02, 0x43, 0x00))
+            } else {
+                // One stored DTC: P0143.
+                listOf(frame(0x7E8, 0x04, 0x43, 0x01, 0x01, 0x43))
+            }
+        }
+        return transport
+    }
+
+    @Test
+    fun `without a vehicle the OBD-II fallback discovers ECUs`() = runTest(dispatcher) {
+        storeCatalog(listOf(canEcu("Engine", 0x7E0)), selected = false)
+        val viewModel = viewModel(obd2Transport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals(FaultCodesUiState.NoVehicle, viewModel.state.value)
+
+        viewModel.useObd2()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcu(listOf(EcuChoice("0x7E0", "OBD-II"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting an OBD-II ECU reads its emission DTCs`() = runTest(dispatcher) {
+        storeCatalog(listOf(canEcu("Engine", 0x7E0)), selected = false)
+        val viewModel = viewModel(obd2Transport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.useObd2()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectEcu("0x7E0")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertEquals("0x7E0", state.ecuName)
+        assertFalse(state.reading)
+        assertNull(state.error)
+        assertEquals(listOf(FaultEntry("P0143", 0, text = null)), state.entries)
+    }
+
+    @Test
+    fun `clearing in OBD-II mode stays behind the confirmation gate`() = runTest(dispatcher) {
+        storeCatalog(listOf(canEcu("Engine", 0x7E0)), selected = false)
+        val transport = obd2Transport(backgroundScope)
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.useObd2()
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("0x7E0")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.requestClear()
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue((viewModel.state.value as FaultCodesUiState.Faults).confirmingClear)
+        assertFalse(transport.sentFrames.contains(frame(0x7E0, 0x01, 0x04)))
+
+        viewModel.confirmClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertTrue(transport.sentFrames.contains(frame(0x7E0, 0x01, 0x04)))
+        assertEquals(emptyList<FaultEntry>(), state.entries)
+    }
 }

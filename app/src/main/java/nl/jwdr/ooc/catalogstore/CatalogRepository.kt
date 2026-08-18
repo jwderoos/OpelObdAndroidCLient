@@ -10,6 +10,8 @@ import nl.jwdr.ooc.catalog.CatalogTree
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.FaultCodeCatalog
 import nl.jwdr.ooc.catalog.FaultCodeParser
+import nl.jwdr.ooc.catalog.MeasuringBlockCatalog
+import nl.jwdr.ooc.catalog.MeasuringBlockParser
 
 /** What the UI shows about the stored catalog. */
 data class CatalogSummary(
@@ -59,6 +61,17 @@ class CatalogRepository(
      * The parsed fault-code texts of [catalogKey], merging suffixed variant
      * files; null when the catalog has no fault-code file for the key.
      */
+    /**
+     * The parsed measuring blocks of [catalogKey]; null when the catalog has
+     * no measuring-block file for the key. Row indices are per-file, so
+     * unlike fault codes, variant files cannot be merged; the first file wins.
+     */
+    suspend fun measuringBlocksFor(catalogKey: String): MeasuringBlockCatalog? {
+        val file = dao.filesFor(CatalogFileKind.MEASURING_BLOCKS.name, catalogKey).firstOrNull()
+            ?: return null
+        return MeasuringBlockParser.parse(CatalogText.decode(file.content), file.fileName)
+    }
+
     suspend fun faultCodesFor(catalogKey: String): FaultCodeCatalog? {
         val files = dao.filesFor(CatalogFileKind.ERROR_CODES.name, catalogKey)
         if (files.isEmpty()) return null

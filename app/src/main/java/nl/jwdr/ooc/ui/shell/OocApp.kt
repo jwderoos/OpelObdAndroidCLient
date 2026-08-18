@@ -41,6 +41,8 @@ import nl.jwdr.ooc.ui.ecus.EcuListViewModel
 import nl.jwdr.ooc.ui.faultcodes.FaultCodesScreen
 import nl.jwdr.ooc.ui.faultcodes.FaultCodesViewModel
 import nl.jwdr.ooc.ui.home.HomeScreen
+import nl.jwdr.ooc.ui.livedata.LiveDataScreen
+import nl.jwdr.ooc.ui.livedata.LiveDataViewModel
 import nl.jwdr.ooc.ui.navigation.Route
 import nl.jwdr.ooc.ui.settings.SettingsScreen
 import nl.jwdr.ooc.transport.ConnectionState
@@ -121,7 +123,18 @@ fun OocApp() {
                         onOpenEcuList = { navController.navigate(Route.EcuList()) },
                     )
                 }
-                composable<Route.LiveData> { PlaceholderScreen(issueNumber = 13) }
+                composable<Route.LiveData> {
+                    LiveDataScreen(
+                        viewModel = containerViewModel {
+                            LiveDataViewModel(
+                                it.catalogRepository,
+                                it.diagnosticsManager,
+                                it.liveDataCsvStore,
+                            )
+                        },
+                        onOpenEcuList = { navController.navigate(Route.EcuList()) },
+                    )
+                }
                 composable<Route.OutputTests> { PlaceholderScreen(issueNumber = 16) }
                 composable<Route.Coding> { PlaceholderScreen(issueNumber = 18) }
                 composable<Route.Settings> { SettingsScreen() }

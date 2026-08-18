@@ -71,6 +71,9 @@ class FaultCodesViewModel(
 
     /** The selected vehicle's CAN ECU definitions, keyed off the picker. */
     private var definitions: List<EcuDefinition> = emptyList()
+
+    /** Non-null while in the no-catalog OBD-II fallback mode. */
+    private var obd2Targets: List<EcuScanTarget>? = null
     private var pendingEcuName: String? = initialEcuName
     private var readJob: Job? = null
 
@@ -82,6 +85,7 @@ class FaultCodesViewModel(
                 ::Pair,
             ).collectLatest { (summary, selected) ->
                 readJob?.cancel()
+                obd2Targets = null
                 if (summary == null || selected == null) {
                     _state.value = FaultCodesUiState.NoVehicle
                     return@collectLatest
@@ -98,7 +102,36 @@ class FaultCodesViewModel(
         }
     }
 
+    /**
+     * Enters the generic OBD-II fallback (#14): discovers the emission ECUs
+     * on the bus and offers them, without any imported catalog.
+     */
+    fun useObd2() {
+        if (_state.value !is FaultCodesUiState.NoVehicle) return
+        readJob?.cancel()
+        viewModelScope.launch {
+            try {
+                if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
+                    diagnosticsManager.connect()
+                }
+                val targets = diagnosticsManager.discoverObd2Ecus()
+                obd2Targets = targets
+                _state.value = FaultCodesUiState.PickEcu(
+                    targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.value = FaultCodesUiState.NoVehicle
+            }
+        }
+    }
+
     fun selectEcu(name: String) {
+        obd2Targets?.let { targets ->
+            targets.find { it.name == name }?.let { readObd2(it) }
+            return
+        }
         val definition = definitions.find { it.name == name } ?: return
         read(definition)
     }
@@ -106,6 +139,10 @@ class FaultCodesViewModel(
     fun refresh() {
         val current = _state.value
         if (current !is FaultCodesUiState.Faults || current.reading || current.clearing) return
+        obd2Targets?.let { targets ->
+            targets.find { it.name == current.ecuName }?.let { readObd2(it) }
+            return
+        }
         definitions.find { it.name == current.ecuName }?.let { read(it) }
     }
 
@@ -130,8 +167,25 @@ class FaultCodesViewModel(
     fun confirmClear() {
         val current = _state.value
         if (current !is FaultCodesUiState.Faults || !current.confirmingClear) return
+        val obd2Target = obd2Targets?.find { it.name == current.ecuName }
+        if (obd2Target != null) {
+            clearWith(current) { diagnosticsManager.obd2ClearDtcs(obd2Target).map(::obd2Entry) }
+            return
+        }
         val definition = definitions.find { it.name == current.ecuName } ?: return
         val address = definition.address as? EcuAddress.Can ?: return
+        clearWith(current) {
+            val remaining = diagnosticsManager.clearDtcs(
+                EcuScanTarget(definition.name, address.requestId, address.responseId),
+            )
+            faultEntries(definition, remaining)
+        }
+    }
+
+    private fun clearWith(
+        current: FaultCodesUiState.Faults,
+        clear: suspend () -> List<FaultEntry>,
+    ) {
         readJob?.cancel()
         readJob = viewModelScope.launch {
             _state.value = current.copy(confirmingClear = false, clearing = true, error = null)
@@ -139,12 +193,9 @@ class FaultCodesViewModel(
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
                     diagnosticsManager.connect()
                 }
-                val remaining = diagnosticsManager.clearDtcs(
-                    EcuScanTarget(definition.name, address.requestId, address.responseId),
-                )
                 _state.value = FaultCodesUiState.Faults(
-                    ecuName = definition.name,
-                    entries = faultEntries(definition, remaining),
+                    ecuName = current.ecuName,
+                    entries = clear(),
                     reading = false,
                     error = null,
                 )
@@ -164,11 +215,48 @@ class FaultCodesViewModel(
 
     fun changeEcu() {
         readJob?.cancel()
-        _state.value = pickerState()
+        _state.value = obd2Targets?.let { targets ->
+            FaultCodesUiState.PickEcu(targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) })
+        } ?: pickerState()
     }
 
     private fun pickerState() =
         FaultCodesUiState.PickEcu(definitions.map { EcuChoice(it.name, it.systemName) })
+
+    private fun obd2Entry(code: Int) = FaultEntry(DtcCode.format(code), symptom = 0, text = null)
+
+    private fun readObd2(target: EcuScanTarget) {
+        readJob?.cancel()
+        readJob = viewModelScope.launch {
+            _state.value = FaultCodesUiState.Faults(
+                ecuName = target.name,
+                entries = emptyList(),
+                reading = true,
+                error = null,
+            )
+            try {
+                if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
+                    diagnosticsManager.connect()
+                }
+                _state.value = FaultCodesUiState.Faults(
+                    ecuName = target.name,
+                    entries = diagnosticsManager.obd2ReadDtcs(target).map(::obd2Entry),
+                    reading = false,
+                    error = null,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    if (it is FaultCodesUiState.Faults) {
+                        it.copy(reading = false, error = userMessageFor(e))
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
+    }
 
     private fun read(definition: EcuDefinition) {
         val address = definition.address as? EcuAddress.Can ?: return
@@ -215,5 +303,10 @@ class FaultCodesViewModel(
             val code = DtcCode.format(dtc.code)
             FaultEntry(code, dtc.symptom, catalog?.textFor(code, dtc.symptom))
         }
+    }
+
+    private companion object {
+        /** Picker subtitle of the fallback mode. */
+        const val OBD2_SYSTEM_NAME = "OBD-II"
     }
 }

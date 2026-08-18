@@ -1,20 +1,35 @@
 package nl.jwdr.ooc.diagnostics
 
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
+import nl.jwdr.ooc.catalog.BlockReading
+import nl.jwdr.ooc.catalog.DataRow
+import nl.jwdr.ooc.catalog.MeasuringBlock
+import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
 import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
+import nl.jwdr.ooc.protocol.kwp2000.ReadDataByLocalIdentifier
+import nl.jwdr.ooc.protocol.obd2.ClearEmissionData
+import nl.jwdr.ooc.protocol.obd2.Obd2Pid
+import nl.jwdr.ooc.protocol.obd2.Obd2Pids
+import nl.jwdr.ooc.protocol.obd2.ReadCurrentData
+import nl.jwdr.ooc.protocol.obd2.ReadStoredDtcs
 import nl.jwdr.ooc.protocol.session.DiagnosticSession
 import nl.jwdr.ooc.protocol.session.SessionConfig
 import nl.jwdr.ooc.protocol.session.SessionException
+import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
@@ -92,6 +107,111 @@ class DiagnosticsManager(
             session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
         }
 
+    /**
+     * Polls one measuring block at a fixed [interval] and emits a decoded
+     * reading per cycle: each MEASDATA identifier is read via
+     * readDataByLocalIdentifier and the records are concatenated in MEASDATA
+     * order before decoding. One session spans the whole poll; it ends when
+     * the collector cancels.
+     */
+    fun pollMeasuringBlock(
+        target: EcuScanTarget,
+        block: MeasuringBlock,
+        rows: List<DataRow>,
+        interval: Duration,
+    ): Flow<BlockReading> = flow {
+        withSession(target, SessionConfig()) { session ->
+            while (true) {
+                var record = ByteArray(0)
+                for (lid in block.measData) {
+                    record += session.execute(ReadDataByLocalIdentifier(lid)).record
+                }
+                emit(MeasuringBlockDecoder.decode(block, rows, record))
+                delay(interval)
+            }
+        }
+    }
+
+    /**
+     * Sends the functional mode 01 PID 00 probe on 0x7DF and returns a target
+     * per ISO 15765-4 ECU that answers (0x7E8..0x7EF, physical request ID 8
+     * below). This is the entry point of the no-catalog OBD-II fallback;
+     * everything after discovery uses physical addressing.
+     */
+    suspend fun discoverObd2Ecus(): List<EcuScanTarget> {
+        val responders = sortedSetOf<Int>()
+        coroutineScope {
+            val collector = launch {
+                transport.incomingFrames.collect { frame ->
+                    if (frame.id in OBD2_RESPONSE_IDS) responders += frame.id
+                }
+            }
+            transport.send(CanFrame(OBD2_FUNCTIONAL_ID, OBD2_PROBE_PAYLOAD))
+            delay(OBD2_DISCOVERY_WINDOW)
+            collector.cancel()
+        }
+        return responders.map { responseId ->
+            val requestId = responseId - 8
+            EcuScanTarget("0x%X".format(requestId), requestId, responseId)
+        }
+    }
+
+    /**
+     * Queries the supported-PID bitmasks (0x00, then each chained range) and
+     * returns the supported PIDs this app knows how to scale, ascending.
+     */
+    suspend fun obd2SupportedPids(target: EcuScanTarget): List<Obd2Pid> =
+        withSession(target, SessionConfig()) { session ->
+            val supported = mutableSetOf<Int>()
+            var base = 0x00
+            while (true) {
+                val response = session.execute(ReadCurrentData(base))
+                supported += Obd2Pids.supportedFrom(base, response.data)
+                base += 0x20
+                if (base > 0xE0 || base !in supported) break
+            }
+            Obd2Pids.all.filter { it.id in supported }
+        }
+
+    /**
+     * Polls the given PIDs at a fixed [interval], emitting one scaled reading
+     * list per cycle in [pids] order, until the collector cancels.
+     */
+    fun pollObd2Pids(
+        target: EcuScanTarget,
+        pids: List<Obd2Pid>,
+        interval: Duration,
+    ): Flow<List<Obd2Value>> = flow {
+        withSession(target, SessionConfig()) { session ->
+            while (true) {
+                emit(
+                    pids.map { pid ->
+                        val response = session.execute(ReadCurrentData(pid.id))
+                        Obd2Value(pid, pid.value(response.data), pid.format(response.data))
+                    },
+                )
+                delay(interval)
+            }
+        }
+    }
+
+    /** Reads the stored emission DTCs (mode 03) as raw two-byte codes. */
+    suspend fun obd2ReadDtcs(target: EcuScanTarget): List<Int> =
+        withSession(target, SessionConfig()) { session ->
+            session.execute(ReadStoredDtcs).codes
+        }
+
+    /**
+     * Clears emission-related data (mode 04), then reads back what the ECU
+     * still stores. Destructive: callers must obtain explicit user
+     * confirmation first (design spec safety rule).
+     */
+    suspend fun obd2ClearDtcs(target: EcuScanTarget): List<Int> =
+        withSession(target, SessionConfig()) { session ->
+            session.execute(ClearEmissionData)
+            session.execute(ReadStoredDtcs).codes
+        }
+
     private suspend fun <T> withSession(
         target: EcuScanTarget,
         config: SessionConfig,
@@ -132,5 +252,20 @@ class DiagnosticsManager(
             responseTimeout = 500.milliseconds,
             maxRetries = 0,
         )
+
+        /** ISO 15765-4 functional request ID. */
+        const val OBD2_FUNCTIONAL_ID = 0x7DF
+
+        /** ISO 15765-4 physical response IDs. */
+        val OBD2_RESPONSE_IDS = 0x7E8..0x7EF
+
+        /** Single-frame mode 01 PID 00: every OBD-II ECU must answer it. */
+        val OBD2_PROBE_PAYLOAD =
+            byteArrayOf(0x02, 0x01, 0x00) + ByteArray(5) { 0xAA.toByte() }
+
+        val OBD2_DISCOVERY_WINDOW = 500.milliseconds
     }
 }
+
+/** One scaled OBD-II reading. */
+data class Obd2Value(val pid: Obd2Pid, val value: Double, val display: String)

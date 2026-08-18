@@ -42,6 +42,7 @@
 
     <string name="fault_codes_no_vehicle">Select a vehicle on the ECU list screen first.</string>
     <string name="action_open_ecu_list">Open ECU list</string>
+    <string name="action_use_obd2">Use generic OBD-II</string>
     <string name="fault_codes_pick_ecu">Choose a control unit</string>
     <string name="fault_codes_reading">Reading fault codes…</string>
     <string name="fault_codes_none">No stored fault codes.</string>
@@ -55,6 +56,19 @@
     <string name="clear_dtcs_dialog_message">This permanently erases all stored fault codes and freeze-frame data from this control unit. Codes whose cause has not been fixed will return. Diagnostic readiness monitors may be reset.</string>
     <string name="clear_dtcs_dialog_confirm">Clear</string>
     <string name="clear_dtcs_dialog_cancel">Cancel</string>
+
+    <!-- Live data -->
+    <string name="live_data_pick_ecu">Choose a control unit</string>
+    <string name="live_data_pick_block">Choose a measuring block</string>
+    <string name="live_data_no_blocks">The catalog lists no measuring blocks for this control unit.</string>
+    <string name="live_data_waiting">Waiting for data…</string>
+    <string name="live_data_raw_note">Raw values — the catalog does not define scaling.</string>
+    <string name="action_change_block">Change block</string>
+    <string name="action_start_logging">Record CSV</string>
+    <string name="action_stop_logging">Stop recording</string>
+    <string name="action_share_csv">Share CSV</string>
+    <string name="live_data_logging">Recording to CSV…</string>
+    <string name="live_data_csv_saved">CSV saved: %1$s</string>
 
     <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
     <string name="error_response_timeout">The control unit did not respond in time.</string>
