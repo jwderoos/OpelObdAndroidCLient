@@ -28,7 +28,10 @@ Two SW-CAN specifics:
 ### Rejected
 
 - **ELM327 clones, WiCAN (Pro), CANable, generic USB-CAN** — HS-CAN only, no
-  pin 1 access.
+  pin 1 access. *Rejected for the roof-module goal only:* a cheap Bluetooth
+  ELM327 clone is supported by the app (issue #19) as an HS-CAN transport for
+  generic OBD-II live data and real-car UI testing while the SW-CAN hardware
+  path is still open.
 - **OBD2→DB9 cable** — passive pin adapter in the CAN-analyzer pinout
   (CAN-H → DB9 7, CAN-L → DB9 2), *not* RS232. Standard ones don't carry
   pin 1 anyway.

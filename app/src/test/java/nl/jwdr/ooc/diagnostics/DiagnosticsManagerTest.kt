@@ -12,6 +12,9 @@ import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.ReplayMode
 import nl.jwdr.ooc.transport.ReplayTransport
+import nl.jwdr.ooc.transport.SwitchableObdTransport
+import nl.jwdr.ooc.transport.elm327.Elm327Transport
+import nl.jwdr.ooc.transport.elm327.ScriptedElm327Link
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,13 +50,24 @@ class DiagnosticsManagerTest {
 
     @Test
     fun `fake and replay transports are flagged as simulated`() = runTest {
-        assertTrue(DiagnosticsManager(FakeEcuTransport(backgroundScope)).isSimulated)
+        assertTrue(DiagnosticsManager(FakeEcuTransport(backgroundScope)).isSimulated.value)
         val emptyLog = CanLog(metadata = emptyMap(), frames = emptyList())
         assertTrue(
             DiagnosticsManager(
                 ReplayTransport(emptyLog, ReplayMode.FastForward, backgroundScope),
-            ).isSimulated,
+            ).isSimulated.value,
         )
+    }
+
+    @Test
+    fun `the simulated flag follows transport switches`() = runTest {
+        val switchable = SwitchableObdTransport(FakeEcuTransport(backgroundScope))
+        val manager = DiagnosticsManager(switchable)
+        assertTrue(manager.isSimulated.value)
+
+        switchable.switchTo(Elm327Transport(ScriptedElm327Link()))
+
+        assertFalse(manager.isSimulated.value)
     }
 
     @Test
@@ -67,6 +81,6 @@ class DiagnosticsManagerTest {
             override suspend fun send(frame: CanFrame) = Unit
         }
 
-        assertFalse(DiagnosticsManager(real).isSimulated)
+        assertFalse(DiagnosticsManager(real).isSimulated.value)
     }
 }

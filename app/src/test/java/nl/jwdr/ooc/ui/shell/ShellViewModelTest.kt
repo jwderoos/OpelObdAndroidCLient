@@ -9,6 +9,8 @@ import kotlinx.coroutines.test.setMain
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
+import nl.jwdr.ooc.transport.elm327.Elm327Transport
+import nl.jwdr.ooc.transport.elm327.ScriptedElm327Link
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -53,9 +55,24 @@ class ShellViewModelTest {
     }
 
     @Test
+    fun `a failing connect surfaces as Error state instead of crashing`() = runTest(dispatcher.scheduler) {
+        // A real adapter that is off or out of range: connect() throws after
+        // moving the transport to Error. The ViewModel must swallow the throw
+        // (the state drives the UI) — uncaught, it would kill the process.
+        val link = ScriptedElm327Link()
+        link.on("ATZ", "?\r\r>")
+        val viewModel = ShellViewModel(DiagnosticsManager(Elm327Transport(link)))
+
+        viewModel.toggleConnection()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertTrue(viewModel.connectionState.value is ConnectionState.Error)
+    }
+
+    @Test
     fun `exposes the simulated flag for the badge`() = runTest(dispatcher.scheduler) {
         val viewModel = ShellViewModel(DiagnosticsManager(FakeEcuTransport(backgroundScope)))
 
-        assertTrue(viewModel.isSimulated)
+        assertTrue(viewModel.isSimulated.value)
     }
 }

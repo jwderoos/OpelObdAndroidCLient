@@ -88,7 +88,8 @@ fun OocApp() {
         },
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
-            if (shellViewModel.isSimulated) {
+            val isSimulated by shellViewModel.isSimulated.collectAsStateWithLifecycle()
+            if (isSimulated) {
                 SimulatedBadge()
             }
             NavHost(navController = navController, startDestination = Route.Home) {

@@ -14,5 +14,11 @@ data class ReadDataByLocalIdentifier(val localIdentifier: Int) :
         )
     }
 
+    /** A positive 0x61 reply echoes the local identifier; anything else is stale. */
+    override fun isExpectedReply(payload: ByteArray): Boolean =
+        payload.size < 2 ||
+            (payload[0].toInt() and 0xFF) != 0x61 ||
+            (payload[1].toInt() and 0xFF) == localIdentifier
+
     class Response(val localIdentifier: Int, val record: ByteArray)
 }

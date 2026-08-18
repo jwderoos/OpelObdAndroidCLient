@@ -1,16 +1,24 @@
 package nl.jwdr.ooc
 
 import android.app.Application
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import nl.jwdr.ooc.catalogstore.CatalogDatabase
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.diagnostics.TransportSelection
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
+import nl.jwdr.ooc.transport.ObdTransport
+import nl.jwdr.ooc.transport.SwitchableObdTransport
+import nl.jwdr.ooc.transport.elm327.Elm327Transport
 import nl.jwdr.ooc.ui.livedata.FileLiveDataCsvStore
 import nl.jwdr.ooc.ui.livedata.LiveDataCsvStore
 
@@ -20,6 +28,8 @@ import nl.jwdr.ooc.ui.livedata.LiveDataCsvStore
  */
 class AppContainer(context: Context) {
 
+    private val appContext = context.applicationContext
+
     /** Outlives any screen; hosts transport background work. */
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -27,22 +37,63 @@ class AppContainer(context: Context) {
         CatalogRepository(CatalogDatabase.get(context).catalogDao())
     }
 
-    /**
-     * Wired to [FakeEcuTransport] until adapter selection lands (#19, #20),
-     * so the shell is drivable end-to-end and always badged as simulated.
-     */
+    private val transportPrefs by lazy {
+        appContext.getSharedPreferences("transport", Context.MODE_PRIVATE)
+    }
+
+    private val _transportSelection by lazy {
+        MutableStateFlow(TransportSelection.decode(transportPrefs.getString(PREF_SELECTION, null)))
+    }
+
+    /** The persisted adapter choice, applied to [switchableTransport] at build time. */
+    val transportSelection: StateFlow<TransportSelection> by lazy { _transportSelection }
+
+    private val switchableTransport by lazy {
+        // A persisted ELM selection must never brick startup (Bluetooth
+        // removed, MAC corrupted): fall back to the demo transport.
+        val initial = runCatching { buildTransport(_transportSelection.value) }.getOrElse {
+            _transportSelection.value = TransportSelection.Demo
+            buildTransport(TransportSelection.Demo)
+        }
+        SwitchableObdTransport(initial)
+    }
+
     val diagnosticsManager: DiagnosticsManager by lazy {
-        DiagnosticsManager(
+        DiagnosticsManager(switchableTransport)
+    }
+
+    /**
+     * Applies and persists a new adapter choice. Only valid while
+     * disconnected; [SwitchableObdTransport.switchTo] enforces that.
+     */
+    fun selectTransport(selection: TransportSelection) {
+        switchableTransport.switchTo(buildTransport(selection))
+        _transportSelection.value = selection
+        transportPrefs.edit().putString(PREF_SELECTION, selection.encode()).apply()
+    }
+
+    private fun buildTransport(selection: TransportSelection): ObdTransport = when (selection) {
+        TransportSelection.Demo ->
             FakeEcuTransport(applicationScope).apply {
                 scriptDemoScanResponses()
                 scriptDemoLiveDataResponses()
                 scriptDemoObd2Responses()
-            },
-        )
+            }
+        is TransportSelection.Elm327Bluetooth -> {
+            // Not IllegalStateException: the settings UI reserves that for
+            // "disconnect first" refusals from SwitchableObdTransport.
+            val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
+                ?: throw IllegalArgumentException("device has no Bluetooth adapter")
+            Elm327Transport(BluetoothSppLink(adapter.getRemoteDevice(selection.address)))
+        }
     }
 
     val liveDataCsvStore: LiveDataCsvStore by lazy {
         FileLiveDataCsvStore(File(context.filesDir, "livedata"))
+    }
+
+    private companion object {
+        const val PREF_SELECTION = "selection"
     }
 }
 

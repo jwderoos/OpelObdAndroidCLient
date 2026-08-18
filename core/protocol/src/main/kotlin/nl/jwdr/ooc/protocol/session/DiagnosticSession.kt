@@ -131,7 +131,7 @@ class DiagnosticSession(
         var retries = 0
         while (true) {
             try {
-                return request.decodeResponse(exchangeOnce(payload))
+                return request.decodeResponse(exchangeOnce(request, payload))
             } catch (e: AttemptLost) {
                 if (retries++ >= config.maxRetries) throw SessionException.ResponseTimeout(serviceId)
             } catch (e: KwpNegativeResponseException) {
@@ -142,7 +142,7 @@ class DiagnosticSession(
         }
     }
 
-    private suspend fun exchangeOnce(requestPayload: ByteArray): ByteArray {
+    private suspend fun exchangeOnce(request: KwpRequest<*>, requestPayload: ByteArray): ByteArray {
         val serviceId = requestPayload[0].toInt() and 0xFF
         try {
             channel.send(requestPayload)
@@ -156,6 +156,7 @@ class DiagnosticSession(
             // Stale payloads of an earlier exchange (still buffered, or a
             // late arrival) are not our reply; keep waiting.
             if (!response.isReplyTo(serviceId)) continue
+            if (!request.isExpectedReply(response)) continue
             if (response.isResponsePending()) {
                 deadline = config.pendingTimeout
                 continue

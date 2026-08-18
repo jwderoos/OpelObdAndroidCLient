@@ -10,8 +10,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import nl.jwdr.ooc.catalog.BlockReading
 import nl.jwdr.ooc.catalog.DataRow
 import nl.jwdr.ooc.catalog.MeasuringBlock
@@ -34,6 +38,7 @@ import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.ReplayTransport
+import nl.jwdr.ooc.transport.SwitchableObdTransport
 
 /**
  * Facade composing the protocol stack and the imported catalog behind one
@@ -52,9 +57,30 @@ class DiagnosticsManager(
     /**
      * True when the session is not talking to a real vehicle. The UI must
      * badge simulated sessions on every screen (design spec safety rule).
+     * A [SwitchableObdTransport] is judged by whatever currently backs it,
+     * so the badge follows adapter selection.
      */
-    val isSimulated: Boolean =
-        transport is FakeEcuTransport || transport is ReplayTransport
+    val isSimulated: StateFlow<Boolean> = object : StateFlow<Boolean> {
+        override val value: Boolean get() = transport.isSimulatedTransport()
+        override val replayCache: List<Boolean> get() = listOf(value)
+        override suspend fun collect(collector: FlowCollector<Boolean>): Nothing {
+            when (transport) {
+                is SwitchableObdTransport ->
+                    transport.active
+                        .map { it.isSimulatedTransport() }
+                        .distinctUntilChanged()
+                        .collect(collector)
+                else -> MutableStateFlow(value).collect(collector)
+            }
+            error("state flows never complete")
+        }
+    }
+
+    private fun ObdTransport.isSimulatedTransport(): Boolean = when (this) {
+        is FakeEcuTransport, is ReplayTransport -> true
+        is SwitchableObdTransport -> active.value.isSimulatedTransport()
+        else -> false
+    }
 
     suspend fun connect() = transport.connect()
 

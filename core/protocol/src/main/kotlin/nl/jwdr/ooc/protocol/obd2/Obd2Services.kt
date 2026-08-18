@@ -23,6 +23,12 @@ data class ReadCurrentData(val pid: Int) : KwpRequest<ReadCurrentData.Response> 
         )
     }
 
+    /** A positive mode 01 reply echoes the PID; anything else is stale. */
+    override fun isExpectedReply(payload: ByteArray): Boolean =
+        payload.size < 2 ||
+            (payload[0].toInt() and 0xFF) != 0x41 ||
+            (payload[1].toInt() and 0xFF) == pid
+
     class Response(val pid: Int, val data: ByteArray)
 }
 

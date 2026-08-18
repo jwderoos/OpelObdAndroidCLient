@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Classic Bluetooth SPP to ELM327 adapters: runtime permission on 12+,
+         install-time legacy permission below. No BLUETOOTH_SCAN needed — the
+         adapter is picked from the system's already-paired devices. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
     <application
         android:name=".OocApplication"
         android:allowBackup="true"
