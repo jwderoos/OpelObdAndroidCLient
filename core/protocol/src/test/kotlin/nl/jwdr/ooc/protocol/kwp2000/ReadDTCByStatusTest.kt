@@ -25,7 +25,7 @@ class ReadDTCByStatusTest {
         )
 
         assertEquals(
-            listOf(Dtc(code = 0x0170, status = 0xE1), Dtc(code = 0x1234, status = 0x60)),
+            listOf(Dtc(code = 0x0170, symptom = 0xE1), Dtc(code = 0x1234, symptom = 0x60)),
             response.dtcs,
         )
     }

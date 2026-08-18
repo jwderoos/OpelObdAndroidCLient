@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
+import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
 import nl.jwdr.ooc.protocol.session.DiagnosticSession
 import nl.jwdr.ooc.protocol.session.SessionConfig
@@ -55,7 +56,34 @@ class DiagnosticsManager(
         }
     }
 
-    private suspend fun probe(target: EcuScanTarget): EcuScanStatus {
+    private suspend fun probe(target: EcuScanTarget): EcuScanStatus =
+        withSession(target, SCAN_SESSION_CONFIG) { session ->
+            try {
+                val response = session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL))
+                EcuScanStatus.Present(dtcCount = response.dtcs.size)
+            } catch (e: SessionException.NegativeResponse) {
+                // It answered, so it exists; it just won't report DTCs this way.
+                EcuScanStatus.Present(dtcCount = null)
+            } catch (e: SessionException.ResponseTimeout) {
+                EcuScanStatus.Absent
+            }
+        }
+
+    /**
+     * Reads the stored DTCs of one known-present ECU. Unlike a scan probe
+     * this uses the conversational timeout/retry policy; failures (negative
+     * response, timeout) propagate as [SessionException]s.
+     */
+    suspend fun readDtcs(target: EcuScanTarget): List<Dtc> =
+        withSession(target, SessionConfig()) { session ->
+            session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+        }
+
+    private suspend fun <T> withSession(
+        target: EcuScanTarget,
+        config: SessionConfig,
+        block: suspend (DiagnosticSession) -> T,
+    ): T {
         // DiagnosticSession needs a real scope for its collector coroutines;
         // an inline coroutineScope would never return while they run.
         val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
@@ -63,17 +91,11 @@ class DiagnosticsManager(
             val session = DiagnosticSession(
                 transport,
                 IsoTpAddress(target.requestId, target.responseId),
-                config = SCAN_SESSION_CONFIG,
+                config = config,
                 scope = sessionScope,
             )
             try {
-                val response = session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL))
-                return EcuScanStatus.Present(dtcCount = response.dtcs.size)
-            } catch (e: SessionException.NegativeResponse) {
-                // It answered, so it exists; it just won't report DTCs this way.
-                return EcuScanStatus.Present(dtcCount = null)
-            } catch (e: SessionException.ResponseTimeout) {
-                return EcuScanStatus.Absent
+                return block(session)
             } finally {
                 session.close()
             }

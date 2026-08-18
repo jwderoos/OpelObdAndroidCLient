@@ -38,6 +38,8 @@ import nl.jwdr.ooc.R
 import nl.jwdr.ooc.ui.containerViewModel
 import nl.jwdr.ooc.ui.ecus.EcuListScreen
 import nl.jwdr.ooc.ui.ecus.EcuListViewModel
+import nl.jwdr.ooc.ui.faultcodes.FaultCodesScreen
+import nl.jwdr.ooc.ui.faultcodes.FaultCodesViewModel
 import nl.jwdr.ooc.ui.home.HomeScreen
 import nl.jwdr.ooc.ui.navigation.Route
 import nl.jwdr.ooc.ui.settings.SettingsScreen
@@ -102,9 +104,23 @@ fun OocApp() {
                         },
                         autoScan = backStackEntry.toRoute<Route.EcuList>().autoScan,
                         onOpenSettings = { navController.navigate(Route.Settings) },
+                        onShowFaults = { ecuName ->
+                            navController.navigate(Route.FaultCodes(ecuName))
+                        },
                     )
                 }
-                composable<Route.FaultCodes> { PlaceholderScreen(issueNumber = 12) }
+                composable<Route.FaultCodes> { backStackEntry ->
+                    FaultCodesScreen(
+                        viewModel = containerViewModel {
+                            FaultCodesViewModel(
+                                it.catalogRepository,
+                                it.diagnosticsManager,
+                                backStackEntry.toRoute<Route.FaultCodes>().ecuName,
+                            )
+                        },
+                        onOpenEcuList = { navController.navigate(Route.EcuList()) },
+                    )
+                }
                 composable<Route.LiveData> { PlaceholderScreen(issueNumber = 13) }
                 composable<Route.OutputTests> { PlaceholderScreen(issueNumber = 16) }
                 composable<Route.Coding> { PlaceholderScreen(issueNumber = 18) }

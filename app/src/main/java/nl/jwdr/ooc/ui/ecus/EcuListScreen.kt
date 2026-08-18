@@ -38,6 +38,7 @@ fun EcuListScreen(
     viewModel: EcuListViewModel,
     autoScan: Boolean,
     onOpenSettings: () -> Unit,
+    onShowFaults: (ecuName: String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -53,6 +54,7 @@ fun EcuListScreen(
             state = current,
             onScan = viewModel::startScan,
             onChangeVehicle = viewModel::changeVehicle,
+            onShowFaults = onShowFaults,
         )
     }
 }
@@ -113,6 +115,7 @@ private fun EcuList(
     state: EcuListUiState.Ecus,
     onScan: () -> Unit,
     onChangeVehicle: () -> Unit,
+    onShowFaults: (ecuName: String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -171,27 +174,40 @@ private fun EcuList(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.rows) { row -> EcuRowCard(row) }
+            items(state.rows) { row -> EcuRowCard(row, onShowFaults) }
         }
     }
 }
 
 @Composable
-private fun EcuRowCard(row: EcuRow) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(row.name, style = MaterialTheme.typography.titleMedium)
-                Text(row.systemName, style = MaterialTheme.typography.bodySmall)
-            }
-            Box { StatusLabel(row.status) }
+private fun EcuRowCard(row: EcuRow, onShowFaults: (ecuName: String) -> Unit) {
+    // Only a responding ECU can be drilled into for its fault codes.
+    if (row.status !is EcuRowStatus.Present) {
+        Card(modifier = Modifier.fillMaxWidth()) { EcuRowContent(row) }
+        return
+    }
+    Card(
+        onClick = { onShowFaults(row.name) },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        EcuRowContent(row)
+    }
+}
+
+@Composable
+private fun EcuRowContent(row: EcuRow) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(row.name, style = MaterialTheme.typography.titleMedium)
+            Text(row.systemName, style = MaterialTheme.typography.bodySmall)
         }
+        Box { StatusLabel(row.status) }
     }
 }
 

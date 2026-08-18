@@ -40,6 +40,16 @@
     <string name="ecu_status_present_unknown">Responding</string>
     <string name="ecu_status_absent">No response</string>
 
+    <string name="fault_codes_no_vehicle">Select a vehicle on the ECU list screen first.</string>
+    <string name="action_open_ecu_list">Open ECU list</string>
+    <string name="fault_codes_pick_ecu">Choose a control unit</string>
+    <string name="fault_codes_reading">Reading fault codes…</string>
+    <string name="fault_codes_none">No stored fault codes.</string>
+    <string name="fault_codes_no_text">No description in catalog</string>
+    <string name="fault_code_display">%1$s - %2$02d</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_change_ecu">Change ECU</string>
+
     <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
     <string name="error_response_timeout">The control unit did not respond in time.</string>
     <string name="error_negative_response">The control unit rejected the request (%1$s).</string>

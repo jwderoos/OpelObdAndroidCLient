@@ -25,7 +25,7 @@ class RoutesTest {
     @Test
     fun `home menu drills into the five feature screens in workflow order`() {
         assertEquals(
-            listOf(Route.EcuList(), Route.FaultCodes, Route.LiveData, Route.OutputTests, Route.Coding),
+            listOf(Route.EcuList(), Route.FaultCodes(), Route.LiveData, Route.OutputTests, Route.Coding),
             HOME_MENU.map { it.route },
         )
     }
