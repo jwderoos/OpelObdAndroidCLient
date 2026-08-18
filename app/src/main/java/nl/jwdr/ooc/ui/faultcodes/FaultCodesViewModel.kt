@@ -16,6 +16,7 @@ import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
+import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.ui.UserMessage
 import nl.jwdr.ooc.ui.userMessageFor
@@ -51,6 +52,10 @@ sealed interface FaultCodesUiState {
         val entries: List<FaultEntry>,
         val reading: Boolean,
         val error: UserMessage?,
+        /** The destructive-clear confirmation dialog is showing. */
+        val confirmingClear: Boolean = false,
+        /** A confirmed clear is on the bus. */
+        val clearing: Boolean = false,
     ) : FaultCodesUiState
 }
 
@@ -100,8 +105,61 @@ class FaultCodesViewModel(
 
     fun refresh() {
         val current = _state.value
-        if (current !is FaultCodesUiState.Faults || current.reading) return
+        if (current !is FaultCodesUiState.Faults || current.reading || current.clearing) return
         definitions.find { it.name == current.ecuName }?.let { read(it) }
+    }
+
+    fun requestClear() {
+        _state.update {
+            if (it is FaultCodesUiState.Faults &&
+                !it.reading && !it.clearing && it.entries.isNotEmpty()
+            ) {
+                it.copy(confirmingClear = true)
+            } else {
+                it
+            }
+        }
+    }
+
+    fun dismissClear() {
+        _state.update {
+            if (it is FaultCodesUiState.Faults) it.copy(confirmingClear = false) else it
+        }
+    }
+
+    fun confirmClear() {
+        val current = _state.value
+        if (current !is FaultCodesUiState.Faults || !current.confirmingClear) return
+        val definition = definitions.find { it.name == current.ecuName } ?: return
+        val address = definition.address as? EcuAddress.Can ?: return
+        readJob?.cancel()
+        readJob = viewModelScope.launch {
+            _state.value = current.copy(confirmingClear = false, clearing = true, error = null)
+            try {
+                if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
+                    diagnosticsManager.connect()
+                }
+                val remaining = diagnosticsManager.clearDtcs(
+                    EcuScanTarget(definition.name, address.requestId, address.responseId),
+                )
+                _state.value = FaultCodesUiState.Faults(
+                    ecuName = definition.name,
+                    entries = faultEntries(definition, remaining),
+                    reading = false,
+                    error = null,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    if (it is FaultCodesUiState.Faults) {
+                        it.copy(clearing = false, error = userMessageFor(e))
+                    } else {
+                        it
+                    }
+                }
+            }
+        }
     }
 
     fun changeEcu() {
@@ -128,13 +186,9 @@ class FaultCodesViewModel(
                 }
                 val target = EcuScanTarget(definition.name, address.requestId, address.responseId)
                 val dtcs = diagnosticsManager.readDtcs(target)
-                val catalog = definition.catalogKey?.let { repository.faultCodesFor(it) }
                 _state.value = FaultCodesUiState.Faults(
                     ecuName = definition.name,
-                    entries = dtcs.map { dtc ->
-                        val code = DtcCode.format(dtc.code)
-                        FaultEntry(code, dtc.symptom, catalog?.textFor(code, dtc.symptom))
-                    },
+                    entries = faultEntries(definition, dtcs),
                     reading = false,
                     error = null,
                 )
@@ -149,6 +203,17 @@ class FaultCodesViewModel(
                     }
                 }
             }
+        }
+    }
+
+    private suspend fun faultEntries(
+        definition: EcuDefinition,
+        dtcs: List<Dtc>,
+    ): List<FaultEntry> {
+        val catalog = definition.catalogKey?.let { repository.faultCodesFor(it) }
+        return dtcs.map { dtc ->
+            val code = DtcCode.format(dtc.code)
+            FaultEntry(code, dtc.symptom, catalog?.textFor(code, dtc.symptom))
         }
     }
 }

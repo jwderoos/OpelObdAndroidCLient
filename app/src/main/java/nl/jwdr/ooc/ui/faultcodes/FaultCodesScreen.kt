@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
@@ -26,8 +27,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.jwdr.ooc.R
 
 /**
- * Fault codes (#12): per-ECU stored DTCs with catalog descriptions.
- * Read-only — clearing is #15.
+ * Fault codes (#12, #15): per-ECU stored DTCs with catalog descriptions,
+ * and clearing behind an explicit confirmation dialog.
  */
 @Composable
 fun FaultCodesScreen(
@@ -40,12 +41,53 @@ fun FaultCodesScreen(
         FaultCodesUiState.Loading -> Unit
         FaultCodesUiState.NoVehicle -> NoVehicle(onOpenEcuList)
         is FaultCodesUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
-        is FaultCodesUiState.Faults -> FaultList(
-            state = current,
-            onRefresh = viewModel::refresh,
-            onChangeEcu = viewModel::changeEcu,
-        )
+        is FaultCodesUiState.Faults -> {
+            FaultList(
+                state = current,
+                onRefresh = viewModel::refresh,
+                onChangeEcu = viewModel::changeEcu,
+                onRequestClear = viewModel::requestClear,
+            )
+            if (current.confirmingClear) {
+                ClearConfirmationDialog(
+                    ecuName = current.ecuName,
+                    onConfirm = viewModel::confirmClear,
+                    onDismiss = viewModel::dismissClear,
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun ClearConfirmationDialog(
+    ecuName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.clear_dtcs_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(ecuName, style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.clear_dtcs_dialog_message))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = stringResource(R.string.clear_dtcs_dialog_confirm),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.clear_dtcs_dialog_cancel))
+            }
+        },
+    )
 }
 
 @Composable
@@ -104,7 +146,9 @@ private fun FaultList(
     state: FaultCodesUiState.Faults,
     onRefresh: () -> Unit,
     onChangeEcu: () -> Unit,
+    onRequestClear: () -> Unit,
 ) {
+    val busy = state.reading || state.clearing
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -115,19 +159,31 @@ private fun FaultList(
         ) {
             Text(state.ecuName, style = MaterialTheme.typography.titleMedium)
             Row {
-                TextButton(onClick = onChangeEcu, enabled = !state.reading) {
+                TextButton(onClick = onChangeEcu, enabled = !busy) {
                     Text(stringResource(R.string.action_change_ecu))
                 }
-                TextButton(onClick = onRefresh, enabled = !state.reading) {
+                TextButton(onClick = onRefresh, enabled = !busy) {
                     Text(stringResource(R.string.action_refresh))
+                }
+                TextButton(
+                    onClick = onRequestClear,
+                    enabled = !busy && state.entries.isNotEmpty(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_clear_dtcs),
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
 
-        if (state.reading) {
+        if (busy) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = stringResource(R.string.fault_codes_reading),
+                    text = stringResource(
+                        if (state.clearing) R.string.fault_codes_clearing
+                        else R.string.fault_codes_reading,
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                 )
                 LinearProgressIndicator(
@@ -147,7 +203,7 @@ private fun FaultList(
             )
         }
 
-        if (!state.reading && state.error == null && state.entries.isEmpty()) {
+        if (!busy && state.error == null && state.entries.isEmpty()) {
             Text(
                 text = stringResource(R.string.fault_codes_none),
                 style = MaterialTheme.typography.bodyLarge,

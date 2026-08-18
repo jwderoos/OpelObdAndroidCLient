@@ -21,6 +21,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -204,6 +205,112 @@ class FaultCodesViewModelTest {
         assertFalse(state.reading)
         assertEquals(R.string.error_negative_response, state.error!!.resId)
         assertEquals(emptyList<FaultEntry>(), state.entries)
+    }
+
+    private fun clearRequest(requestId: Int) = frame(requestId, 0x03, 0x14, 0xFF, 0x00)
+
+    /** A transport scripted with one stored DTC that disappears once cleared. */
+    private fun transportWithClearableDtc(
+        transport: FakeEcuTransport,
+        clearResponse: CanFrame = frame(0x7E8, 0x01, 0x54),
+    ) {
+        var cleared = false
+        transport.onFrame(clearRequest(0x7E0)).respondBy {
+            cleared = true
+            listOf(clearResponse)
+        }
+        transport.onFrame(readRequest(0x7E0)).respondBy {
+            if (cleared) {
+                listOf(frame(0x7E8, 0x02, 0x58, 0x00))
+            } else {
+                listOf(frame(0x7E8, 0x05, 0x58, 0x01, 0x00, 0x16, 0x00))
+            }
+        }
+    }
+
+    @Test
+    fun `requesting a clear asks for confirmation without touching the bus`() = runTest(dispatcher) {
+        storeCatalog(ecus = listOf(canEcu("Engine", 0x7E0)))
+        val transport = FakeEcuTransport(backgroundScope)
+        transportWithClearableDtc(transport)
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.requestClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertTrue(state.confirmingClear)
+        assertFalse(transport.sentFrames.contains(clearRequest(0x7E0)))
+    }
+
+    @Test
+    fun `dismissing the confirmation clears nothing`() = runTest(dispatcher) {
+        storeCatalog(ecus = listOf(canEcu("Engine", 0x7E0)))
+        val transport = FakeEcuTransport(backgroundScope)
+        transportWithClearableDtc(transport)
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.requestClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.dismissClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertFalse(state.confirmingClear)
+        assertFalse(transport.sentFrames.contains(clearRequest(0x7E0)))
+        assertEquals(1, state.entries.size)
+    }
+
+    @Test
+    fun `confirming the clear sends it and re-reads the ECU`() = runTest(dispatcher) {
+        storeCatalog(ecus = listOf(canEcu("Engine", 0x7E0)))
+        val transport = FakeEcuTransport(backgroundScope)
+        transportWithClearableDtc(transport)
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.requestClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.confirmClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertTrue(transport.sentFrames.contains(clearRequest(0x7E0)))
+        assertFalse(state.confirmingClear)
+        assertFalse(state.clearing)
+        assertFalse(state.reading)
+        assertNull(state.error)
+        assertEquals(emptyList<FaultEntry>(), state.entries)
+    }
+
+    @Test
+    fun `a failing clear surfaces an error and keeps the fault list`() = runTest(dispatcher) {
+        storeCatalog(ecus = listOf(canEcu("Engine", 0x7E0)))
+        val transport = FakeEcuTransport(backgroundScope)
+        // 7F 14 11: serviceNotSupported.
+        transportWithClearableDtc(transport, clearResponse = frame(0x7E8, 0x03, 0x7F, 0x14, 0x11))
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.requestClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.confirmClear()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertFalse(state.clearing)
+        assertEquals(R.string.error_negative_response, state.error!!.resId)
+        assertEquals(1, state.entries.size)
     }
 
     @Test

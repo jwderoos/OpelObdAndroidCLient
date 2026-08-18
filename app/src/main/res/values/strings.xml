@@ -49,6 +49,12 @@
     <string name="fault_code_display">%1$s - %2$02d</string>
     <string name="action_refresh">Refresh</string>
     <string name="action_change_ecu">Change ECU</string>
+    <string name="action_clear_dtcs">Clear fault codes</string>
+    <string name="fault_codes_clearing">Clearing fault codes…</string>
+    <string name="clear_dtcs_dialog_title">Clear fault codes?</string>
+    <string name="clear_dtcs_dialog_message">This permanently erases all stored fault codes and freeze-frame data from this control unit. Codes whose cause has not been fixed will return. Diagnostic readiness monitors may be reset.</string>
+    <string name="clear_dtcs_dialog_confirm">Clear</string>
+    <string name="clear_dtcs_dialog_cancel">Cancel</string>
 
     <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
     <string name="error_response_timeout">The control unit did not respond in time.</string>

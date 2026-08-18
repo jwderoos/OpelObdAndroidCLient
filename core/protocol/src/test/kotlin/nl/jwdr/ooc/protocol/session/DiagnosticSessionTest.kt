@@ -67,6 +67,39 @@ class DiagnosticSessionTest {
         assertEquals(0x10, e.serviceId)
     }
 
+    @Test
+    fun `a stale response for another service is not taken as the reply`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        // A leftover readDTCByStatus reply (0x58) precedes the real reply,
+        // as when a previous exchange's frame is still buffered.
+        transport.onFrame(request(0x02, 0x10, 0x81)).respondWith(
+            response(0x05, 0x58, 0x01, 0x00, 0x16, 0x00),
+            response(0x02, 0x50, 0x81),
+        )
+        transport.connect()
+        val session = session(transport, backgroundScope)
+
+        val result = session.execute(StartDiagnosticSession(0x81))
+
+        assertEquals(StartDiagnosticSession.Response(0x81), result)
+    }
+
+    @Test
+    fun `a stale negative response for another service is not taken as the reply`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        // 7F 18 11: a leftover rejection of readDTCByStatus, not of us.
+        transport.onFrame(request(0x02, 0x10, 0x81)).respondWith(
+            response(0x03, 0x7F, 0x18, 0x11),
+            response(0x02, 0x50, 0x81),
+        )
+        transport.connect()
+        val session = session(transport, backgroundScope)
+
+        val result = session.execute(StartDiagnosticSession(0x81))
+
+        assertEquals(StartDiagnosticSession.Response(0x81), result)
+    }
+
     // --- timeout and retry ---
 
     @Test

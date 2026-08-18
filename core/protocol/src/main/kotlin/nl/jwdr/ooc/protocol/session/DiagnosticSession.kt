@@ -143,6 +143,7 @@ class DiagnosticSession(
     }
 
     private suspend fun exchangeOnce(requestPayload: ByteArray): ByteArray {
+        val serviceId = requestPayload[0].toInt() and 0xFF
         try {
             channel.send(requestPayload)
         } catch (e: IllegalStateException) {
@@ -152,12 +153,23 @@ class DiagnosticSession(
         var deadline = config.responseTimeout
         while (true) {
             val response = receiveOrNull(deadline) ?: throw AttemptLost()
+            // Stale payloads of an earlier exchange (still buffered, or a
+            // late arrival) are not our reply; keep waiting.
+            if (!response.isReplyTo(serviceId)) continue
             if (response.isResponsePending()) {
                 deadline = config.pendingTimeout
                 continue
             }
             return response
         }
+    }
+
+    private fun ByteArray.isReplyTo(serviceId: Int): Boolean = when {
+        isEmpty() -> false
+        (this[0].toInt() and 0xFF) == serviceId + 0x40 -> true
+        else -> size >= 2 &&
+            (this[0].toInt() and 0xFF) == 0x7F &&
+            (this[1].toInt() and 0xFF) == serviceId
     }
 
     /**

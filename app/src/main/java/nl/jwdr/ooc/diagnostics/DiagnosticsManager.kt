@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
+import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
 import nl.jwdr.ooc.protocol.session.DiagnosticSession
@@ -76,6 +77,18 @@ class DiagnosticsManager(
      */
     suspend fun readDtcs(target: EcuScanTarget): List<Dtc> =
         withSession(target, SessionConfig()) { session ->
+            session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+        }
+
+    /**
+     * Clears all stored DTC groups of one ECU, then reads back and returns
+     * what it still stores (same session), so the UI shows the ECU's actual
+     * state rather than an assumption. Destructive: callers must obtain
+     * explicit user confirmation first (design spec safety rule).
+     */
+    suspend fun clearDtcs(target: EcuScanTarget): List<Dtc> =
+        withSession(target, SessionConfig()) { session ->
+            session.execute(ClearDiagnosticInformation(DTC_GROUP_ALL))
             session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
         }
 
