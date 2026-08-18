@@ -16,6 +16,7 @@ import nl.jwdr.ooc.catalogstore.CatalogFileEntity
 import nl.jwdr.ooc.catalogstore.CatalogPayload
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.EcuEntity
+import nl.jwdr.ooc.catalogstore.FakeCatalogDao
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,24 +25,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-
-private class FakeCatalogDao : CatalogDao {
-    val stored = MutableStateFlow<CatalogPayload?>(null)
-
-    override fun observeCatalog(): Flow<CatalogEntity?> = stored.map { it?.catalog }
-    override fun observeEcuCount(): Flow<Int> = stored.map { it?.ecus?.size ?: 0 }
-    override suspend fun ecusByCatalogKey(catalogKey: String): List<EcuEntity> =
-        stored.value?.ecus?.filter { it.catalogKey == catalogKey }.orEmpty()
-    override suspend fun filesFor(kind: String, fileKey: String): List<CatalogFileEntity> =
-        stored.value?.files?.filter { it.kind == kind && it.fileKey == fileKey }.orEmpty()
-    override suspend fun deleteCatalogs() { stored.value = null }
-    override suspend fun deleteEcus() {}
-    override suspend fun deleteFiles() {}
-    override suspend fun insertCatalog(catalog: CatalogEntity) = throw AssertionError("use replaceCatalog")
-    override suspend fun insertEcus(ecus: List<EcuEntity>) = throw AssertionError("use replaceCatalog")
-    override suspend fun insertFiles(files: List<CatalogFileEntity>) = throw AssertionError("use replaceCatalog")
-    override suspend fun replaceCatalog(payload: CatalogPayload) { stored.value = payload }
-}
 
 private class MapCatalogTree(private val files: Map<String, ByteArray>) : CatalogTree {
     override fun list(directory: String): List<String> {

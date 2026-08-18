@@ -33,8 +33,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import nl.jwdr.ooc.R
 import nl.jwdr.ooc.ui.containerViewModel
+import nl.jwdr.ooc.ui.ecus.EcuListScreen
+import nl.jwdr.ooc.ui.ecus.EcuListViewModel
 import nl.jwdr.ooc.ui.home.HomeScreen
 import nl.jwdr.ooc.ui.navigation.Route
 import nl.jwdr.ooc.ui.settings.SettingsScreen
@@ -92,7 +95,15 @@ fun OocApp() {
                         onNavigate = { route -> navController.navigate(route) },
                     )
                 }
-                composable<Route.EcuList> { PlaceholderScreen(issueNumber = 11) }
+                composable<Route.EcuList> { backStackEntry ->
+                    EcuListScreen(
+                        viewModel = containerViewModel {
+                            EcuListViewModel(it.catalogRepository, it.diagnosticsManager)
+                        },
+                        autoScan = backStackEntry.toRoute<Route.EcuList>().autoScan,
+                        onOpenSettings = { navController.navigate(Route.Settings) },
+                    )
+                }
                 composable<Route.FaultCodes> { PlaceholderScreen(issueNumber = 12) }
                 composable<Route.LiveData> { PlaceholderScreen(issueNumber = 13) }
                 composable<Route.OutputTests> { PlaceholderScreen(issueNumber = 16) }
