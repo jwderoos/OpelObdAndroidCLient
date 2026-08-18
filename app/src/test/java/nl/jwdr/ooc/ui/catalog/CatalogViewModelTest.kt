@@ -40,6 +40,14 @@ private val validTree = MapCatalogTree(
     mapOf("opeldata.txt" to "2010 (A)\tExamplia-A\tEngine\tZ 99 XX\tMotronic X\tCAN\tHSCAN\t0500.0\t0x000007E0\t0x000005E8\t0x000007E8\tEXAMPLIAENGZ99XX\n".toByteArray()),
 )
 
+private val treeWithEcuFiles = MapCatalogTree(
+    mapOf(
+        "opeldata.txt" to "2010 (A)\tExamplia-A\tEngine\tZ 99 XX\tMotronic X\tCAN\tHSCAN\t0500.0\t0x000007E0\t0x000005E8\t0x000007E8\tEXAMPLIAENGZ99XX\n".toByteArray(),
+        "ErrorCodes/EXAMPLIAENGZ99XX.txt" to "P0016\n-00\tCrankshaft Correlation\n".toByteArray(),
+        "ErrorCodes/EXAMPLIAABS.txt" to "C0040\n-00\tWheel Speed Sensor\n".toByteArray(),
+    ),
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class CatalogViewModelTest {
 
@@ -74,6 +82,20 @@ class CatalogViewModelTest {
         assertEquals(1234L, state.summary!!.importedAtEpochMillis)
         assertEquals(1, state.summary!!.ecuCount)
         assertEquals(dao.stored.value!!.catalog.sourceHash, state.summary!!.sourceHash)
+    }
+
+    @Test
+    fun `import reports per-file progress with the current file name`() = runTest(dispatcher) {
+        viewModel.import(treeWithEcuFiles, label = "Test Catalog")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // Progress is kept after completion (the UI only shows it while
+        // importing); the last event covers the full file count.
+        val progress = viewModel.progress.value
+        assertNotNull(progress)
+        assertEquals(2, progress!!.done)
+        assertEquals(2, progress.total)
+        assertEquals("ErrorCodes/EXAMPLIAENGZ99XX.txt", progress.path)
     }
 
     @Test

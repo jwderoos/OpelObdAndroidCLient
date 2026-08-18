@@ -12,12 +12,19 @@ object CatalogText {
 
     /**
      * Splits catalog text into lines with 1-based numbers, accepting CR LF and
-     * LF, trimming trailing whitespace, and dropping `;` comments and blanks.
+     * LF, and dropping `;` comments and blank lines. Trailing spaces and
+     * line-terminator remnants are trimmed, but a trailing TAB is preserved:
+     * it delimits an empty trailing field (they occur in real catalogs; see
+     * docs/catalog-format.md). Real files also end with stray NUL bytes after
+     * the final CRLF; NULs count as blank, so that junk never reaches a
+     * parser.
      */
     internal fun contentLines(text: String): List<Line> =
         text.lineSequence()
-            .mapIndexed { index, raw -> Line(index + 1, raw.trimEnd()) }
-            .filter { it.text.isNotEmpty() && !it.text.startsWith(";") }
+            .mapIndexed { index, raw -> Line(index + 1, raw.trimEnd('\r', '\n', ' ')) }
+            .filter { line ->
+                line.text.any { !it.isWhitespace() && it != '\u0000' } && !line.text.startsWith(";")
+            }
             .toList()
 
     internal data class Line(val number: Int, val text: String)

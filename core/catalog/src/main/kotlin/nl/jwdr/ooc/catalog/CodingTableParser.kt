@@ -4,7 +4,8 @@ package nl.jwdr.ooc.catalog
 object CodingTableParser {
 
     private val didInName = Regex("""\.0[xX]([0-9A-Fa-f]+)\.""")
-    private val didEntry = Regex("""([0-9A-Fa-f]+),(\d+)""")
+    // A rare third field occurs (`42,13,14`); meaning not established, ignored.
+    private val didEntry = Regex("""([0-9A-Fa-f]+),(\d+)(?:,\d+)*""")
     private const val DISABLED = "**DISABLED**"
 
     /** [fileName] must carry the coding DID, e.g. `EXAMPLIADIS.0x1201.txt`. */
@@ -21,8 +22,13 @@ object CodingTableParser {
             when (line.text) {
                 "[DID_begin]" -> section = "did"
                 "[DID_end]" -> section = null
+                // [MBA_begin]..[MBA_end]: same hexId,count shape as DID;
+                // meaning not yet established, tolerated and skipped.
+                "[MBA_begin]" -> section = "mba"
+                "[MBA_end]" -> section = null
                 "[VARIANT CODING DATA]" -> section = "rows"
                 else -> when (section) {
+                    "mba" -> Unit
                     "did" -> {
                         val match = didEntry.matchEntire(line.text)
                             ?: throw CatalogFormatException(
@@ -47,9 +53,15 @@ object CodingTableParser {
                             },
                         )
                     }
-                    else -> throw CatalogFormatException(
-                        fileName, line.number, "unexpected line outside any section: '${line.text}'",
-                    )
+                    else -> {
+                        // Junk is tolerated only before the first section:
+                        // one real file has an uncommented `REF 13` preamble.
+                        if (didEntries.isNotEmpty() || rows.isNotEmpty()) {
+                            throw CatalogFormatException(
+                                fileName, line.number, "unexpected line outside any section: '${line.text}'",
+                            )
+                        }
+                    }
                 }
             }
         }

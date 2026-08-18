@@ -37,8 +37,25 @@ class CatalogImporterTest {
     @Test
     fun `imports ecu definitions from opeldata`() {
         val imported = CatalogImporter.import(syntheticTree())
-        assertEquals(7, imported.ecuDefinitions.size)
+        assertEquals(11, imported.ecuDefinitions.size)
         assertTrue(imported.ecuDefinitions.any { it.catalogKey == "EXAMPLIAENGZ99XX" })
+    }
+
+    @Test
+    fun `reports progress per validated file`() {
+        val events = mutableListOf<Triple<Int, Int, String>>()
+
+        CatalogImporter.import(syntheticTree()) { done, total, path ->
+            events += Triple(done, total, path)
+        }
+
+        assertEquals("one event per per-ECU file", 4, events.size)
+        assertTrue("total is stable", events.all { it.second == 4 })
+        assertEquals("done counts up", listOf(1, 2, 3, 4), events.map { it.first })
+        assertTrue(
+            "paths carry the directory",
+            events.any { it.third == "MeasuringBlocks/EXAMPLIAENGZ99XX.MBF.txt" },
+        )
     }
 
     @Test

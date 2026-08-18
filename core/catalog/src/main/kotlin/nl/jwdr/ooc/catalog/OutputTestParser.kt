@@ -28,10 +28,20 @@ object OutputTestParser {
             i += 3
 
             val records = mutableMapOf<String, MutableList<CommandRecord>>()
+            val annotations = mutableMapOf<String, MutableList<String>>()
             var closed = false
             while (i < lines.size) {
                 val body = lines[i]
                 if (body.text == "[end]") { closed = true; i++; break }
+                val annotation = ANNOTATION_MARKERS.firstOrNull {
+                    body.text.startsWith(it) && body.text.endsWith(it) && body.text.length > 2 * it.length
+                }
+                if (annotation != null) {
+                    annotations.getOrPut(annotation) { mutableListOf() } +=
+                        body.text.removeSurrounding(annotation).trim()
+                    i++
+                    continue
+                }
                 val match = commandRecord.matchEntire(body.text)
                     ?: fail(body.number, "expected a command record, found '${body.text}'")
                 val key = match.groupValues[1]
@@ -54,10 +64,17 @@ object OutputTestParser {
                 goActivate = records["GoActivate"].orEmpty(),
                 deActivate = records["DeActivate"].orEmpty(),
                 afterTest = records["AfterTest"].orEmpty(),
+                displayTags = annotations["**"].orEmpty(),
+                preTestInstructions = annotations["##"].orEmpty(),
+                activeLabels = annotations["$$"].orEmpty(),
+                postTestInstructions = annotations["@@"].orEmpty(),
             )
         }
         return OutputTestCatalog(tests)
     }
 
     private val RECORD_KEYS = setOf("BeforeTest", "GoActivate", "DeActivate", "AfterTest")
+
+    /** `**tag**`, `##pre-instruction##`, `$$active label$$`, `@@post-instruction@@`. */
+    private val ANNOTATION_MARKERS = listOf("**", "##", "$$", "@@")
 }

@@ -21,6 +21,24 @@ class OutputTestParserTest {
     }
 
     @Test
+    fun `annotation lines are preserved by kind`() {
+        // K-line SCR files decorate tests with **display tags**, ##operator
+        // instructions##, $$active labels$$ and @@post-test instructions@@ —
+        // the instructions are the safety preconditions issue #16 must show.
+        val parsed = OutputTestParser.parse(
+            "Ignition Coil Test\n[TESTTYPE=ONOFF]\n[begin]\n**AKKUFESZ**\n" +
+                "##Connect Test Spark Plug!##\n\$\$Frequency 1/s\$\$\n@@Disconnect Test Spark Plug!@@\n" +
+                "GoActivate=\t0x80,0x11,\n[end]\n",
+            "TEST.SCR.txt",
+        )
+        val test = parsed.tests.single()
+        assertEquals(listOf("AKKUFESZ"), test.displayTags)
+        assertEquals(listOf("Connect Test Spark Plug!"), test.preTestInstructions)
+        assertEquals(listOf("Frequency 1/s"), test.activeLabels)
+        assertEquals(listOf("Disconnect Test Spark Plug!"), test.postTestInstructions)
+    }
+
+    @Test
     fun `parses command records in order`() {
         val test = catalog.tests[0]
         assertEquals(2, test.beforeTest.size)

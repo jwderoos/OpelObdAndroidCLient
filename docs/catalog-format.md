@@ -248,6 +248,39 @@ Check Control,string,Not Present,Present,**DISABLED**,**DISABLED**
   the raw coded value. `**DISABLED**` entries are placeholder value slots
   that must not be offered for selection.
 
+## Real-data variances (observed in a full OP-COM 08-2010 EN catalog)
+
+Verified by `LocalCatalogConformanceTest` (point `OOC_CATALOG_DIR` at a local
+decoded catalog; skips clean-room). Parsers tolerate all of these:
+
+- Files end with stray NUL bytes after the final CRLF; structural lines may
+  carry trailing spaces. A trailing TAB, however, delimits an empty field.
+- `opeldata.txt`: 3 menu-only rows (AFL) with an empty protocol field and
+  nothing after it; K-line rows with `????` baud rates or comma-list init
+  types (`2,1`) — kept as unaddressable entries; `CHCAN` is a fifth bus value
+  (Astra-J chassis expansion, 9 rows).
+- MBF: standalone `SM=` metadata next to `ID=`; `PRE_MEAS=` setup commands
+  (dynamicallyDefineLocalIdentifier) preserved per block; `MEASBLOCKCMD=` raw
+  K-line frames for blocks without `MEASDATA`; a headerless variant (21
+  files) with one top-level `MEASDATA` forming a single implicit block;
+  `[TABLEnnn]` scaling-lookup sections (skipped, K-line only); one bare
+  `[begin]` continuation group extending the previous block; enable ranges
+  counting the table's trailing blank line(s) (clamped); stub files with
+  blocks but no data table; one file whose preamble comment is missing `;`.
+- ErrorCodes: an inline style (151 files) with `code<TAB>text` and no symptom
+  sub-lines (symptom 0); symptom markers are HEX bytes (`-E0`), with `-?` /
+  `-??` as any-symptom wildcards and `-D?` a low-nibble wildcard; codes span
+  SAE letter codes with hex digits (`P253F`) and 2–6 digit legacy numerics;
+  `[DEFAFAULT]` / `[SELECTIVE]` / `[SUZUKIDIAG]` variant-dispatch directives
+  (skipped — semantics live in "Open questions"); one stray `0x0203` line.
+- SCR: annotation lines inside blocks — `**display tag**`, `##pre-test
+  instruction##`, `$$active label$$`, `@@post-test instruction@@` — preserved
+  on `OutputTest` (the instructions are the safety preconditions issue #16
+  must show).
+- CANVARCODING: an `[MBA_begin]`..`[MBA_end]` section (4 files, skipped);
+  one uncommented `REF 13` preamble; DID entries with a third field
+  (`42,13,14`, ignored).
+
 ## Versioning and identity
 
 Decoded files carry no schema version. This app stores, per import: the
@@ -261,6 +294,9 @@ source file's hash and import date; re-import replaces the stored catalog
 - Meaning of `ID=` values in MBF / error-code files.
 - The `[DID_begin]` pair-to-row mapping in variant-coding tables.
 - Field 9 of K-line records in `opeldata.txt`.
+- `SM=` values in MBF files; the `[MBA]` section and third DID field in
+  coding tables; the `[SELECTIVE]`/`[DEFAFAULT]` dispatch semantics
+  (hardware-id → sub-catalog selection for display variants).
 
 Parsers must treat these as opaque and preserve them, so nothing is lost for
 later milestones.

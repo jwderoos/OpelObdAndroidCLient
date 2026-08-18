@@ -15,10 +15,24 @@ data class DataRow(
 data class MeasuringBlock(
     val number: Int,
     val title: String,
-    /** Identifier bytes requested to populate the block, as written in MEASDATA. */
+    /**
+     * Identifier bytes requested to populate the block, as written in
+     * MEASDATA. Empty for raw-command blocks (see [rawCommands]).
+     */
     val measData: List<Int>,
     /** 1-based inclusive row range into the data table. */
     val enabledRows: IntRange,
+    /**
+     * PRE_MEAS setup commands (typically dynamicallyDefineLocalIdentifier,
+     * 0x2C) to send before reading; preserved verbatim, not yet executed by
+     * the app.
+     */
+    val preMeas: List<List<Int>> = emptyList(),
+    /**
+     * MEASBLOCKCMD raw request frames for blocks defined without MEASDATA
+     * (old K-line engine files); preserved verbatim, not yet executed.
+     */
+    val rawCommands: List<List<Int>> = emptyList(),
 )
 
 /** Parsed content of one `MeasuringBlocks/<KEY>.MBF.txt` file. */

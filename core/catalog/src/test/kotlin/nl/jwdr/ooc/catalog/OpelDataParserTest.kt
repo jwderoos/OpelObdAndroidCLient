@@ -12,7 +12,50 @@ class OpelDataParserTest {
 
     @Test
     fun `skips comments and blank lines`() {
-        assertEquals(7, definitions.size)
+        assertEquals(11, definitions.size)
+    }
+
+    @Test
+    fun `trailing NUL junk after the last record is ignored`() {
+        // Real files end with stray 0x00 bytes after the final CRLF; the
+        // resulting pseudo-line must not be parsed as a record.
+        val text = "2010 (A)\tExamplia-A\tVehicle\tX\tX\tCAN\tIDENT\r\n\u0000\u0000\u0000"
+        assertEquals(1, OpelDataParser.parse(text).size)
+    }
+
+    @Test
+    fun `parses a chassis-expansion CHCAN record`() {
+        val sensor = definitions.single { it.name == "Acceleration Sensor" }
+        val address = sensor.address as EcuAddress.Can
+        assertEquals(CanBus.CHCAN, address.bus)
+        assertEquals(0x244, address.requestId)
+    }
+
+    @Test
+    fun `a K-line record with placeholder or list-valued fields stays as an unaddressable entry`() {
+        // Real catalogs contain K-line rows with '????' baud rates and
+        // comma-list init types (e.g. '2,1'). K-line is out of scope for this
+        // app; keep the rows for display instead of failing the import.
+        val cruise = definitions.single { it.name == "Cruise Control" }
+        assertEquals("KW82", cruise.protocol)
+        assertEquals(EcuAddress.None, cruise.address)
+        assertNull(cruise.catalogKey)
+
+        val immo = definitions.single { it.name == "Old Immobiliser" }
+        assertEquals("KW2000", immo.protocol)
+        assertEquals(EcuAddress.None, immo.address)
+        assertEquals("EXAMPLIAIMMO", immo.catalogKey)
+    }
+
+    @Test
+    fun `a record with an empty protocol field is an unaddressable placeholder`() {
+        // Real OP-COM catalogs contain menu-only rows (e.g. AFL) whose
+        // protocol field and everything after it is empty; the import must
+        // keep them as placeholders instead of aborting.
+        val placeholder = definitions.single { it.name == "Menu Placeholder" }
+        assertEquals("", placeholder.protocol)
+        assertEquals(EcuAddress.None, placeholder.address)
+        assertNull(placeholder.catalogKey)
     }
 
     @Test

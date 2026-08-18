@@ -25,6 +25,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current.applicationContext
     val viewModel = containerViewModel { CatalogViewModel(it.catalogRepository) }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val progress by viewModel.progress.collectAsStateWithLifecycle()
 
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -54,6 +55,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             state = state,
             onImportFolder = { folderPicker.launch(null) },
             onImportFile = { filePicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+            progress = progress,
         )
     }
 }

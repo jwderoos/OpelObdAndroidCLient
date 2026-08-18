@@ -33,8 +33,12 @@ class CatalogRepository(
         }
 
     /** Validates and stores [tree], replacing any previous catalog. */
-    suspend fun import(tree: CatalogTree, label: String) {
-        val imported = CatalogImporter.import(tree)
+    suspend fun import(
+        tree: CatalogTree,
+        label: String,
+        onProgress: (done: Int, total: Int, path: String) -> Unit = { _, _, _ -> },
+    ) {
+        val imported = CatalogImporter.import(tree, onProgress)
         dao.replaceCatalog(imported.toPayload(label, clock()))
     }
 

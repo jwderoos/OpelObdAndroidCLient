@@ -46,15 +46,26 @@ object CatalogImporter {
 
     private const val OPELDATA = "opeldata.txt"
 
-    fun import(tree: CatalogTree): ImportedCatalog {
+    /**
+     * @param onProgress called after each validated per-ECU file with the
+     *   running count, the stable total, and the file's path.
+     */
+    fun import(
+        tree: CatalogTree,
+        onProgress: (done: Int, total: Int, path: String) -> Unit = { _, _, _ -> },
+    ): ImportedCatalog {
         val opelDataBytes = tree.read(OPELDATA)
             ?: throw CatalogFormatException(OPELDATA, null, "not found — select the decoded catalog folder containing opeldata.txt")
         val ecuDefinitions = OpelDataParser.parse(CatalogText.decode(opelDataBytes), OPELDATA)
 
+        val listings = CatalogFileKind.entries.associateWith { tree.list(it.directory).sorted() }
+        val total = listings.values.sumOf { it.size }
+        var done = 0
+
         val hashed = sortedMapOf(OPELDATA to opelDataBytes)
         val files = mutableListOf<CatalogFile>()
         for (kind in CatalogFileKind.entries) {
-            for (fileName in tree.list(kind.directory).sorted()) {
+            for (fileName in listings.getValue(kind)) {
                 val path = "${kind.directory}/$fileName"
                 val bytes = tree.read(path) ?: continue
                 val text = CatalogText.decode(bytes)
@@ -71,6 +82,7 @@ object CatalogImporter {
                     bytes = bytes,
                 )
                 hashed[path] = bytes
+                onProgress(++done, total, path)
             }
         }
         return ImportedCatalog(ecuDefinitions, files, sourceHash(hashed))

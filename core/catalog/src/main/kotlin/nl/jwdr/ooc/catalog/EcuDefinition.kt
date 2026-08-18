@@ -1,7 +1,7 @@
 package nl.jwdr.ooc.catalog
 
 /** CAN bus a diagnosable ECU sits on. */
-enum class CanBus { HSCAN, MSCAN, SWCAN, VIRTUAL }
+enum class CanBus { HSCAN, MSCAN, SWCAN, CHCAN, VIRTUAL }
 
 /** How an ECU is reached, per its `opeldata.txt` record. */
 sealed interface EcuAddress {

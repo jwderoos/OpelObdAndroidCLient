@@ -21,6 +21,14 @@ data class OutputTest(
     val goActivate: List<CommandRecord> = emptyList(),
     val deActivate: List<CommandRecord> = emptyList(),
     val afterTest: List<CommandRecord> = emptyList(),
+    /** `**TAG**` markers: live readouts to show while the test runs. */
+    val displayTags: List<String> = emptyList(),
+    /** `##…##` operator instructions to confirm before activating. */
+    val preTestInstructions: List<String> = emptyList(),
+    /** `$$…$$` labels shown while the test is active. */
+    val activeLabels: List<String> = emptyList(),
+    /** `@@…@@` operator instructions for after the test. */
+    val postTestInstructions: List<String> = emptyList(),
 )
 
 /** Parsed content of one output-test script file. */

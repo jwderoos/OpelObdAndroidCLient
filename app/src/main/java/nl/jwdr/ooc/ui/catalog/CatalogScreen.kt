@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,6 +32,7 @@ fun CatalogScreen(
     onImportFolder: () -> Unit,
     onImportFile: () -> Unit,
     modifier: Modifier = Modifier,
+    progress: ImportProgress? = null,
 ) {
     Column(
         modifier = modifier
@@ -41,7 +43,7 @@ fun CatalogScreen(
         Text("Diagnostic catalog", style = MaterialTheme.typography.headlineSmall)
 
         when {
-            state.importing -> ImportingIndicator()
+            state.importing -> ImportingIndicator(progress)
             state.summary != null -> CatalogStatusCard(state.summary)
             else -> OnboardingText()
         }
@@ -61,14 +63,28 @@ fun CatalogScreen(
 }
 
 @Composable
-private fun ImportingIndicator() {
+private fun ImportingIndicator(progress: ImportProgress?) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        CircularProgressIndicator()
-        Text("Validating and importing catalog…")
+        if (progress == null) {
+            // Enumerating directories; per-file counts follow.
+            CircularProgressIndicator()
+            Text("Validating and importing catalog…")
+        } else {
+            LinearProgressIndicator(
+                progress = { progress.done.toFloat() / progress.total },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("Validating file ${progress.done} of ${progress.total}")
+            Text(
+                progress.path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

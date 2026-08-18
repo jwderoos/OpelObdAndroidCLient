@@ -9,3 +9,7 @@
 2010 (A)	Examplia-A	Body	Central Door Lock	Central Door Lock	CAN	VIRTUAL	0000.0	0x00000000	0x00000000	0x00000000	????
 2010 (A)	Examplia-A	Body	Airbag	Airbag	KW2000	10400	EXAMPLIASRS	7	89	3
 2010 (A)	Examplia-A	Car Identification	Car Identification	Car Identification	IDENTKW2000
+2010 (A)	Examplia-A	Body	Menu Placeholder	Menu Placeholder	
+2010 (A)	Examplia-A	Chassis	Cruise Control	Cruise Control	KW82	????	????	12	103	2,1
+2010 (A)	Examplia-A	Body	Old Immobiliser	Old Immobiliser	KW2000	9600	EXAMPLIAIMMO	7	113	1,2
+2010 (A)	Examplia-A	Chassis	Acceleration Sensor	Acceleration Sensor	CAN	CHCAN	0500.0	0x00000244	0x00000544	0x00000644	????

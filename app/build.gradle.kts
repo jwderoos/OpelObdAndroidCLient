@@ -6,6 +6,10 @@ plugins {
 }
 
 android {
+    testOptions {
+        // android.util.Log calls (e.g. import progress) no-op in JVM tests.
+        unitTests.isReturnDefaultValues = true
+    }
     namespace = "nl.jwdr.ooc"
     compileSdk {
         version = release(37)
