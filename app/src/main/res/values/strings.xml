@@ -1,3 +1,32 @@
 <resources>
     <string name="app_name">Opel OBD Client</string>
+
+    <!-- Screen titles -->
+    <string name="screen_home">Vehicle</string>
+    <string name="screen_ecu_list">ECU list</string>
+    <string name="screen_fault_codes">Fault codes</string>
+    <string name="screen_live_data">Live data</string>
+    <string name="screen_output_tests">Output tests</string>
+    <string name="screen_coding">Coding</string>
+    <string name="screen_settings">Settings</string>
+
+    <!-- Shell chrome -->
+    <string name="connection_disconnected">Disconnected</string>
+    <string name="connection_connecting">Connecting…</string>
+    <string name="connection_ready">Connected</string>
+    <string name="connection_error">Connection error</string>
+    <string name="badge_simulated">SIMULATED — not a real vehicle</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_scan_all">Scan all ECUs</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_settings">Settings</string>
+    <string name="placeholder_screen">Not implemented yet — tracked in issue #%1$d.</string>
+
+    <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
+    <string name="error_response_timeout">The control unit did not respond in time.</string>
+    <string name="error_negative_response">The control unit rejected the request (%1$s).</string>
+    <string name="error_transport_lost">Connection to the adapter was lost.</string>
+    <string name="error_session_closed">The diagnostic session was closed.</string>
+    <string name="error_generic_communication">Communication with the vehicle failed.</string>
 </resources>
