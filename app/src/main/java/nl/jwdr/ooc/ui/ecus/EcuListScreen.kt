@@ -49,7 +49,20 @@ fun EcuListScreen(
     when (val current = state) {
         EcuListUiState.Loading -> Unit
         EcuListUiState.NoCatalog -> NoCatalog(onOpenSettings)
-        is EcuListUiState.PickVehicle -> VehiclePicker(current.vehicles, viewModel::selectVehicle)
+        is EcuListUiState.PickVehicle ->
+            VehicleNamePicker(current.vehicleNames, viewModel::selectVehicleName)
+        is EcuListUiState.PickYear -> YearPicker(
+            vehicleName = current.vehicleName,
+            years = current.years,
+            onSelect = viewModel::selectYear,
+            onBack = viewModel::backToVehicleNames,
+        )
+        is EcuListUiState.PickEcuGroup -> EcuGroupPicker(
+            vehicle = current.vehicle,
+            groups = current.groups,
+            onSelect = viewModel::selectGroup,
+            onBack = viewModel::backToYearPicker,
+        )
         is EcuListUiState.Ecus -> EcuList(
             state = current,
             onScan = viewModel::startScan,
@@ -80,9 +93,60 @@ private fun NoCatalog(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun VehiclePicker(
-    vehicles: List<VehicleRef>,
-    onSelect: (VehicleRef) -> Unit,
+private fun VehicleNamePicker(
+    vehicleNames: List<String>,
+    onSelect: (String) -> Unit,
+) {
+    PickerList(
+        title = stringResource(R.string.ecu_list_pick_vehicle),
+        items = vehicleNames,
+        itemLabel = { it },
+        onSelect = onSelect,
+    )
+}
+
+@Composable
+private fun YearPicker(
+    vehicleName: String,
+    years: List<String>,
+    onSelect: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    PickerList(
+        title = stringResource(R.string.ecu_list_pick_year),
+        subtitle = vehicleName,
+        items = years,
+        itemLabel = { it },
+        onSelect = onSelect,
+        onBack = onBack,
+    )
+}
+
+@Composable
+private fun EcuGroupPicker(
+    vehicle: VehicleRef,
+    groups: List<String>,
+    onSelect: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    PickerList(
+        title = stringResource(R.string.ecu_list_pick_group),
+        subtitle = "${vehicle.vehicle} · ${vehicle.modelYear}",
+        items = groups,
+        itemLabel = { it },
+        onSelect = onSelect,
+        onBack = onBack,
+    )
+}
+
+@Composable
+private fun PickerList(
+    title: String,
+    items: List<String>,
+    itemLabel: (String) -> String,
+    onSelect: (String) -> Unit,
+    subtitle: String? = null,
+    onBack: (() -> Unit)? = null,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -90,21 +154,29 @@ private fun VehiclePicker(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
+            if (onBack != null) {
+                TextButton(onClick = onBack) {
+                    Text(stringResource(R.string.action_back))
+                }
+            }
             Text(
-                text = stringResource(R.string.ecu_list_pick_vehicle),
+                text = title,
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 8.dp),
             )
+            subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
         }
-        items(vehicles) { vehicle ->
+        items(items) { item ->
             Card(
-                onClick = { onSelect(vehicle) },
+                onClick = { onSelect(item) },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(vehicle.vehicle, style = MaterialTheme.typography.titleMedium)
-                    Text(vehicle.modelYear, style = MaterialTheme.typography.bodyMedium)
-                }
+                Text(itemLabel(item), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
             }
         }
     }
@@ -127,7 +199,10 @@ private fun EcuList(
         ) {
             Column {
                 Text(state.vehicle.vehicle, style = MaterialTheme.typography.titleMedium)
-                Text(state.vehicle.modelYear, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "${state.vehicle.modelYear} · ${state.group}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             TextButton(onClick = onChangeVehicle, enabled = !state.scanning) {
                 Text(stringResource(R.string.action_change_vehicle))

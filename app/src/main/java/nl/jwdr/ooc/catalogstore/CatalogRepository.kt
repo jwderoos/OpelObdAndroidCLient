@@ -63,6 +63,20 @@ class CatalogRepository(
     suspend fun canEcusFor(ref: VehicleRef): List<EcuDefinition> =
         dao.canEcusForVehicle(ref.modelYear, ref.vehicle).map { it.toDefinition() }
 
+    /** The catalog's distinct vehicle names, one per distinct `vehicle` value. */
+    val vehicleNames: Flow<List<String>> = dao.observeVehicleNames()
+
+    /** The distinct model years [vehicle] is catalogued under. */
+    suspend fun yearsFor(vehicle: String): List<String> = dao.yearsForVehicle(vehicle)
+
+    /** The distinct ECU groups (e.g. Engine, Chassis) catalogued for [ref]. */
+    suspend fun groupsFor(ref: VehicleRef): List<String> =
+        dao.groupsForVehicleYear(ref.modelYear, ref.vehicle)
+
+    /** The diagnosable (CAN-addressed) ECUs of [ref] within [group], as domain definitions. */
+    suspend fun canEcusFor(ref: VehicleRef, group: String): List<EcuDefinition> =
+        dao.canEcusForVehicleGroup(ref.modelYear, ref.vehicle, group).map { it.toDefinition() }
+
     /**
      * The parsed fault-code texts of [catalogKey], merging suffixed variant
      * files; null when the catalog has no fault-code file for the key.

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import nl.jwdr.ooc.catalog.EcuAddress
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.CatalogSummary
 import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanStatus
@@ -53,17 +54,33 @@ sealed interface EcuListUiState {
     /** No catalog imported; point the user to Settings. */
     data object NoCatalog : EcuListUiState
 
-    /** A catalog exists but no vehicle is selected yet. */
-    data class PickVehicle(val vehicles: List<VehicleRef>) : EcuListUiState
+    /** A catalog exists but no vehicle name is chosen yet. */
+    data class PickVehicle(val vehicleNames: List<String>) : EcuListUiState
 
-    /** The selected vehicle's ECU list, with per-ECU scan status. */
+    /** A vehicle name is chosen; offer its catalogued model years. */
+    data class PickYear(val vehicleName: String, val years: List<String>) : EcuListUiState
+
+    /** A vehicle + year is chosen and has more than one ECU group; offer them. */
+    data class PickEcuGroup(val vehicle: VehicleRef, val groups: List<String>) : EcuListUiState
+
+    /** The selected vehicle/year/ECU-group's ECU list, with per-ECU scan status. */
     data class Ecus(
         val vehicle: VehicleRef,
+        val group: String,
         val rows: List<EcuRow>,
         val scanning: Boolean,
         val error: UserMessage?,
     ) : EcuListUiState
 }
+
+/** One (summary, vehicleNames, pendingVehicleName, selectedVehicle, selectedGroup) tuple. */
+private data class Selection(
+    val summary: CatalogSummary?,
+    val vehicleNames: List<String>,
+    val pendingVehicleName: String?,
+    val selectedVehicle: VehicleRef?,
+    val selectedGroup: String?,
+)
 
 class EcuListViewModel(
     private val repository: CatalogRepository,
@@ -77,45 +94,88 @@ class EcuListViewModel(
     private var targets: List<EcuScanTarget> = emptyList()
     private var scanJob: Job? = null
 
+    /** Chosen at the vehicle-name step, before a year (and thus a [VehicleRef]) exists. */
+    private val pendingVehicleName = MutableStateFlow<String?>(null)
+
+    /** Chosen at the ECU-group step; never persisted, unlike the vehicle/year selection. */
+    private val selectedGroup = MutableStateFlow<String?>(null)
+
     init {
         viewModelScope.launch {
             combine(
                 repository.summary,
-                repository.vehicles,
+                repository.vehicleNames,
+                pendingVehicleName,
                 repository.selectedVehicle,
-                ::Triple,
-            ).collectLatest { (summary, vehicles, selected) ->
+                selectedGroup,
+                ::Selection,
+            ).collectLatest { selection ->
                 scanJob?.cancel()
-                _state.value = when {
-                    summary == null -> EcuListUiState.NoCatalog
-                    selected == null -> EcuListUiState.PickVehicle(vehicles)
-                    else -> ecusState(selected)
-                }
+                _state.value = resolveState(selection)
             }
         }
     }
 
-    private suspend fun ecusState(selected: VehicleRef): EcuListUiState.Ecus {
-        val definitions = repository.canEcusFor(selected)
+    private suspend fun resolveState(selection: Selection): EcuListUiState {
+        val (summary, vehicleNames, pendingName, selectedVehicle, group) = selection
+        return when {
+            summary == null -> EcuListUiState.NoCatalog
+            selectedVehicle == null && pendingName == null -> EcuListUiState.PickVehicle(vehicleNames)
+            selectedVehicle == null -> EcuListUiState.PickYear(pendingName!!, repository.yearsFor(pendingName))
+            group == null -> pickGroupOrSkip(selectedVehicle)
+            else -> ecusState(selectedVehicle, group)
+        }
+    }
+
+    private suspend fun pickGroupOrSkip(vehicle: VehicleRef): EcuListUiState {
+        val groups = repository.groupsFor(vehicle)
+        val single = groups.singleOrNull()
+        return if (single != null) ecusState(vehicle, single) else EcuListUiState.PickEcuGroup(vehicle, groups)
+    }
+
+    private suspend fun ecusState(vehicle: VehicleRef, group: String): EcuListUiState.Ecus {
+        val definitions = repository.canEcusFor(vehicle, group)
         targets = definitions.mapNotNull { definition ->
             (definition.address as? EcuAddress.Can)?.let {
                 EcuScanTarget(definition.name, it.requestId, it.responseId)
             }
         }
         return EcuListUiState.Ecus(
-            vehicle = selected,
+            vehicle = vehicle,
+            group = group,
             rows = definitions.map { EcuRow(it.name, it.systemName, EcuRowStatus.NotScanned) },
             scanning = false,
             error = null,
         )
     }
 
-    fun selectVehicle(ref: VehicleRef) {
-        viewModelScope.launch { repository.selectVehicle(ref) }
+    fun selectVehicleName(name: String) {
+        pendingVehicleName.value = name
+    }
+
+    fun backToVehicleNames() {
+        pendingVehicleName.value = null
+    }
+
+    fun selectYear(year: String) {
+        val name = pendingVehicleName.value ?: return
+        viewModelScope.launch { repository.selectVehicle(VehicleRef(year, name)) }
+    }
+
+    /** Un-persists the year while keeping the vehicle name, returning to the year picker. */
+    fun backToYearPicker() {
+        selectedGroup.value = null
+        viewModelScope.launch { repository.selectVehicle(null) }
+    }
+
+    fun selectGroup(group: String) {
+        selectedGroup.value = group
     }
 
     fun changeVehicle() {
         scanJob?.cancel()
+        pendingVehicleName.value = null
+        selectedGroup.value = null
         viewModelScope.launch { repository.selectVehicle(null) }
     }
 

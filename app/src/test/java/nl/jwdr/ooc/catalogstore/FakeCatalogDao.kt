@@ -18,9 +18,35 @@ class FakeCatalogDao : CatalogDao {
             .distinct()
             .sortedWith(compareBy({ it.modelYear }, { it.vehicle }))
     }
+    override fun observeVehicleNames(): Flow<List<String>> = stored.map { payload ->
+        payload?.ecus.orEmpty().map { it.vehicle }.distinct().sorted()
+    }
+    override suspend fun yearsForVehicle(vehicle: String): List<String> =
+        stored.value?.ecus.orEmpty()
+            .filter { it.vehicle == vehicle }
+            .map { it.modelYear }
+            .distinct()
+            .sorted()
+    override suspend fun groupsForVehicleYear(modelYear: String, vehicle: String): List<String> =
+        stored.value?.ecus.orEmpty()
+            .filter { it.modelYear == modelYear && it.vehicle == vehicle }
+            .map { it.groupName }
+            .distinct()
+            .sorted()
     override suspend fun canEcusForVehicle(modelYear: String, vehicle: String): List<EcuEntity> =
         stored.value?.ecus.orEmpty()
             .filter { it.modelYear == modelYear && it.vehicle == vehicle && it.addressType == "CAN" }
+            .sortedBy { it.name }
+    override suspend fun canEcusForVehicleGroup(
+        modelYear: String,
+        vehicle: String,
+        groupName: String,
+    ): List<EcuEntity> =
+        stored.value?.ecus.orEmpty()
+            .filter {
+                it.modelYear == modelYear && it.vehicle == vehicle &&
+                    it.groupName == groupName && it.addressType == "CAN"
+            }
             .sortedBy { it.name }
     override suspend fun updateSelectedVehicle(modelYear: String?, vehicle: String?) {
         stored.value = stored.value?.let {

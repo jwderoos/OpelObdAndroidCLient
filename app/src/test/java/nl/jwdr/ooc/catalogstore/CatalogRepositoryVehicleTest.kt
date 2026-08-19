@@ -104,4 +104,52 @@ class CatalogRepositoryVehicleTest {
             definitions.single().address,
         )
     }
+
+    @Test
+    fun `vehicleNames lists each distinct vehicle name once, sorted`() = runTest {
+        storeCatalog(
+            canEcu("2007", "Corsa-D", "Engine", 0x7E0),
+            canEcu("2005", "Astra-H", "Engine", 0x7E0),
+            canEcu("2009", "Astra-H", "ABS", 0x241),
+        )
+
+        assertEquals(listOf("Astra-H", "Corsa-D"), repository.vehicleNames.first())
+    }
+
+    @Test
+    fun `yearsFor lists only that vehicle's distinct model years, sorted`() = runTest {
+        storeCatalog(
+            canEcu("2005", "Astra-H", "Engine", 0x7E0),
+            canEcu("2009", "Astra-H", "ABS", 0x241),
+            canEcu("2007", "Corsa-D", "Engine", 0x7E0),
+        )
+
+        assertEquals(listOf("2005", "2009"), repository.yearsFor("Astra-H"))
+    }
+
+    @Test
+    fun `groupsFor lists only that vehicle-year's distinct ECU groups, sorted`() = runTest {
+        storeCatalog(
+            canEcu("2005", "Astra-H", "Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("2005", "Astra-H", "ABS", 0x241).copy(groupName = "Chassis"),
+            canEcu("2009", "Astra-H", "Radio", 0x300).copy(groupName = "Infotainment"),
+        )
+
+        assertEquals(
+            listOf("Chassis", "Engine"),
+            repository.groupsFor(VehicleRef("2005", "Astra-H")),
+        )
+    }
+
+    @Test
+    fun `canEcusFor with a group returns only that vehicle-year-group's CAN ECUs`() = runTest {
+        storeCatalog(
+            canEcu("2005", "Astra-H", "Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("2005", "Astra-H", "ABS", 0x241).copy(groupName = "Chassis"),
+        )
+
+        val definitions = repository.canEcusFor(VehicleRef("2005", "Astra-H"), group = "Engine")
+
+        assertEquals(listOf("Engine"), definitions.map { it.name })
+    }
 }

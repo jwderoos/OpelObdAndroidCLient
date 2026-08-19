@@ -21,11 +21,29 @@ interface CatalogDao {
     @Query("SELECT DISTINCT modelYear, vehicle FROM ecus ORDER BY modelYear, vehicle")
     fun observeVehicles(): Flow<List<VehicleRef>>
 
+    @Query("SELECT DISTINCT vehicle FROM ecus ORDER BY vehicle")
+    fun observeVehicleNames(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT modelYear FROM ecus WHERE vehicle = :vehicle ORDER BY modelYear")
+    suspend fun yearsForVehicle(vehicle: String): List<String>
+
+    @Query(
+        "SELECT DISTINCT groupName FROM ecus WHERE modelYear = :modelYear AND vehicle = :vehicle " +
+            "ORDER BY groupName",
+    )
+    suspend fun groupsForVehicleYear(modelYear: String, vehicle: String): List<String>
+
     @Query(
         "SELECT * FROM ecus WHERE modelYear = :modelYear AND vehicle = :vehicle " +
             "AND addressType = 'CAN' ORDER BY name",
     )
     suspend fun canEcusForVehicle(modelYear: String, vehicle: String): List<EcuEntity>
+
+    @Query(
+        "SELECT * FROM ecus WHERE modelYear = :modelYear AND vehicle = :vehicle " +
+            "AND groupName = :groupName AND addressType = 'CAN' ORDER BY name",
+    )
+    suspend fun canEcusForVehicleGroup(modelYear: String, vehicle: String, groupName: String): List<EcuEntity>
 
     @Query("UPDATE catalogs SET selectedModelYear = :modelYear, selectedVehicle = :vehicle")
     suspend fun updateSelectedVehicle(modelYear: String?, vehicle: String?)

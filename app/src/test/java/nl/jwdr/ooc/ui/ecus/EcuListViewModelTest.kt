@@ -99,29 +99,125 @@ class EcuListViewModelTest {
         assertEquals(EcuListUiState.NoCatalog, viewModel.state.value)
     }
 
+    /** Selects the fixture's only vehicle, year, and (implicitly, auto-skipped) ECU group. */
+    private suspend fun selectAstraH2005(viewModel: EcuListViewModel) {
+        viewModel.selectVehicleName("Astra-H")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectYear("2005")
+        dispatcher.scheduler.advanceUntilIdle()
+    }
+
     @Test
-    fun `with a catalog but no selection the screen offers the vehicle picker`() = runTest(dispatcher) {
+    fun `with a catalog but no selection the screen offers the vehicle-name picker`() = runTest(dispatcher) {
         storeCatalog(canEcu("Engine", 0x7E0))
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 
+        assertEquals(EcuListUiState.PickVehicle(listOf("Astra-H")), viewModel.state.value)
+    }
+
+    @Test
+    fun `selecting a vehicle name offers its model years`() = runTest(dispatcher) {
+        storeCatalog(
+            canEcu("Engine", 0x7E0),
+            canEcu("Engine", 0x7E0).copy(modelYear = "2009"),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectVehicleName("Astra-H")
+        dispatcher.scheduler.advanceUntilIdle()
+
         assertEquals(
-            EcuListUiState.PickVehicle(listOf(VehicleRef("2005", "Astra-H"))),
+            EcuListUiState.PickYear("Astra-H", listOf("2005", "2009")),
             viewModel.state.value,
         )
     }
 
     @Test
-    fun `selecting a vehicle shows its CAN ECUs, not yet scanned`() = runTest(dispatcher) {
-        storeCatalog(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0))
+    fun `back from the year picker returns to the vehicle-name picker`() = runTest(dispatcher) {
+        storeCatalog(canEcu("Engine", 0x7E0))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectVehicleName("Astra-H")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.backToVehicleNames()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(EcuListUiState.PickVehicle(listOf("Astra-H")), viewModel.state.value)
+    }
+
+    @Test
+    fun `selecting a year with more than one ECU group offers the group picker`() = runTest(dispatcher) {
+        storeCatalog(
+            canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+        )
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 
-        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
+        selectAstraH2005(viewModel)
+
+        assertEquals(
+            EcuListUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `back from the ECU-group picker returns to the year picker`() = runTest(dispatcher) {
+        storeCatalog(
+            canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
+
+        viewModel.backToYearPicker()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            EcuListUiState.PickYear("Astra-H", listOf("2005")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting an ECU group shows only that group's CAN ECUs, not yet scanned`() = runTest(dispatcher) {
+        storeCatalog(
+            canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
+
+        viewModel.selectGroup("Engine")
         dispatcher.scheduler.advanceUntilIdle()
 
         val state = viewModel.state.value as EcuListUiState.Ecus
         assertEquals(VehicleRef("2005", "Astra-H"), state.vehicle)
+        assertEquals("Engine", state.group)
+        assertFalse(state.scanning)
+        assertEquals(
+            listOf(EcuRow("Engine", "Engine system", EcuRowStatus.NotScanned)),
+            state.rows,
+        )
+    }
+
+    @Test
+    fun `a single ECU group is auto-selected, skipping straight to the ECU list`() = runTest(dispatcher) {
+        storeCatalog(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        selectAstraH2005(viewModel)
+
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertEquals(VehicleRef("2005", "Astra-H"), state.vehicle)
+        assertEquals("Body", state.group)
         assertFalse(state.scanning)
         assertEquals(
             listOf(
@@ -141,8 +237,7 @@ class EcuListViewModelTest {
             .respondWith(frame(0x249, 0x05, 0x58, 0x01, 0x01, 0x70, 0xE1))
         val viewModel = viewModel(transport)
         dispatcher.scheduler.advanceUntilIdle()
-        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
-        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
 
         viewModel.startScan()
         dispatcher.scheduler.advanceUntilIdle()
@@ -174,8 +269,7 @@ class EcuListViewModelTest {
         }
         val viewModel = viewModel(broken)
         dispatcher.scheduler.advanceUntilIdle()
-        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
-        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
 
         viewModel.startScan()
         dispatcher.scheduler.advanceUntilIdle()
@@ -186,12 +280,11 @@ class EcuListViewModelTest {
     }
 
     @Test
-    fun `changing the vehicle returns to the picker`() = runTest(dispatcher) {
+    fun `changing the vehicle returns to the vehicle-name picker`() = runTest(dispatcher) {
         storeCatalog(canEcu("Engine", 0x7E0))
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
-        viewModel.selectVehicle(VehicleRef("2005", "Astra-H"))
-        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
 
         viewModel.changeVehicle()
         dispatcher.scheduler.advanceUntilIdle()
