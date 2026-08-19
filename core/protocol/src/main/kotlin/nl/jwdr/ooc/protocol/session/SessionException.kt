@@ -13,6 +13,14 @@ sealed class SessionException(message: String) : Exception(message) {
     class NegativeResponse(val serviceId: Int, val error: KwpError) :
         SessionException("service 0x%02X rejected: %s".format(serviceId, error))
 
+    /**
+     * A SecurityAccess key submission was rejected: [error] is one of
+     * [KwpError.InvalidKey], [KwpError.ExceededNumberOfAttempts], or
+     * [KwpError.RequiredTimeDelayNotExpired].
+     */
+    class UnlockFailed(val error: KwpError) :
+        SessionException("security access denied: %s".format(error))
+
     /** The underlying transport left the Ready state. */
     class TransportLost : SessionException("transport connection lost")
 

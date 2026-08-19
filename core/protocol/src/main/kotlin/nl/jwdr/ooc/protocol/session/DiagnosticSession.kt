@@ -19,6 +19,8 @@ import nl.jwdr.ooc.protocol.isotp.IsoTpConfig
 import nl.jwdr.ooc.protocol.kwp2000.KwpError
 import nl.jwdr.ooc.protocol.kwp2000.KwpNegativeResponseException
 import nl.jwdr.ooc.protocol.kwp2000.KwpRequest
+import nl.jwdr.ooc.protocol.kwp2000.SecurityAccess
+import nl.jwdr.ooc.protocol.kwp2000.SeedKeyAlgorithm
 import nl.jwdr.ooc.protocol.kwp2000.StartDiagnosticSession
 import nl.jwdr.ooc.protocol.kwp2000.TesterPresent
 import nl.jwdr.ooc.transport.ConnectionState
@@ -37,6 +39,15 @@ enum class SessionState {
 
     /** [DiagnosticSession.close] was called. */
     Closed,
+}
+
+/** Result of [DiagnosticSession.unlock]. */
+sealed interface UnlockOutcome {
+    /** The computed key was accepted. */
+    data object Unlocked : UnlockOutcome
+
+    /** The seed came back all-zero: the ECU was already unlocked, no key was sent. */
+    data object AlreadyUnlocked : UnlockOutcome
 }
 
 /**
@@ -91,6 +102,26 @@ class DiagnosticSession(
         _state.value = SessionState.Active
         startKeepAlive()
         return response
+    }
+
+    /**
+     * Unlocks security access at the odd access mode [level]: requests the
+     * seed, and unless the ECU reports it is already unlocked, computes the
+     * key via [algorithm] and sends it at [level] + 1.
+     *
+     * @throws SessionException
+     */
+    suspend fun unlock(level: Int, algorithm: SeedKeyAlgorithm): UnlockOutcome {
+        require(level % 2 == 1) { "security level must be an odd access mode, got $level" }
+        val seed = execute(SecurityAccess.RequestSeed(level))
+        if (seed.alreadyUnlocked) return UnlockOutcome.AlreadyUnlocked
+        val key = algorithm.computeKey(seed.seed, level)
+        try {
+            execute(SecurityAccess.SendKey(level + 1, key))
+        } catch (e: SessionException.NegativeResponse) {
+            throw SessionException.UnlockFailed(e.error)
+        }
+        return UnlockOutcome.Unlocked
     }
 
     /**
