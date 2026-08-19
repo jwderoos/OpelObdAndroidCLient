@@ -111,6 +111,30 @@ class DiagnosticSession(
         }
     }
 
+    /**
+     * Sends [payload] without awaiting any response, for services whose
+     * reply is out-of-band (GMLAN readDataByPacketIdentifier answers with
+     * UUDT frames on the secondary CAN id, never with a USDT response).
+     * Serialized with [execute] callers; resets the keep-alive idle timer.
+     *
+     * @throws SessionException
+     */
+    suspend fun sendWithoutResponse(payload: ByteArray) {
+        require(payload.isNotEmpty()) { "payload must not be empty" }
+        ensureUsable()
+        requestLock.withLock {
+            ensureUsable()
+            try {
+                channel.send(payload)
+            } catch (e: IllegalStateException) {
+                // The transport refuses to send when it is no longer Ready.
+                throw SessionException.TransportLost()
+            } finally {
+                idleReset.trySend(Unit)
+            }
+        }
+    }
+
     /** Stops the keep-alive and rejects further requests. */
     fun close() {
         keepAlive?.cancel()

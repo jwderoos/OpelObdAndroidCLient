@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.NonCancellable
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nl.jwdr.ooc.catalog.DisplayTagBindings
 import nl.jwdr.ooc.catalog.EcuAddress
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.OutputTest
@@ -22,6 +24,7 @@ import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
 import nl.jwdr.ooc.diagnostics.OutputTestRun
+import nl.jwdr.ooc.diagnostics.TagReadout
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.ui.UserMessage
 import nl.jwdr.ooc.ui.faultcodes.EcuChoice
@@ -66,6 +69,8 @@ sealed interface OutputTestsUiState {
         /** A control command is on the bus. */
         val busy: Boolean = false,
         val error: UserMessage? = null,
+        /** Live display-tag readings; empty when the test has none. */
+        val readouts: List<TagReadout> = emptyList(),
     ) : OutputTestsUiState
 }
 
@@ -84,6 +89,7 @@ class OutputTestsViewModel(
     private var tests: List<OutputTest> = emptyList()
 
     private var run: OutputTestRun? = null
+    private var readoutsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -150,9 +156,23 @@ class OutputTestsViewModel(
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
                     diagnosticsManager.connect()
                 }
+                val bindings = if (test.displayTags.isEmpty()) {
+                    emptyList()
+                } else {
+                    definition.catalogKey?.let { repository.measuringBlocksFor(it) }
+                        ?.let { DisplayTagBindings.resolve(it, test.displayTags) }
+                        .orEmpty()
+                }
                 val started = diagnosticsManager.startOutputTest(
-                    EcuScanTarget(definition.name, address.requestId, address.responseId),
+                    EcuScanTarget(
+                        definition.name,
+                        address.requestId,
+                        address.responseId,
+                        // 0 in catalog records that carry no broadcast id.
+                        address.secondaryId.takeIf { it != 0 },
+                    ),
                     test,
+                    bindings,
                 )
                 // The catalog/vehicle selection may have changed while
                 // connect/start were suspended; don't resurrect a stale run.
@@ -162,7 +182,15 @@ class OutputTestsViewModel(
                     return@launch
                 }
                 run = started
-                _state.value = OutputTestsUiState.Running(current.ecuName, test)
+                readoutsJob = viewModelScope.launch {
+                    started.readouts.collect { readouts ->
+                        _state.update { s ->
+                            if (s is OutputTestsUiState.Running) s.copy(readouts = readouts) else s
+                        }
+                    }
+                }
+                _state.value =
+                    OutputTestsUiState.Running(current.ecuName, test, readouts = started.readouts.value)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -184,7 +212,9 @@ class OutputTestsViewModel(
         val current = _state.value as? OutputTestsUiState.Running ?: return
         if (current.busy) return
         viewModelScope.launch {
-            _state.value = current.copy(busy = true, error = null)
+            _state.update { s ->
+                if (s is OutputTestsUiState.Running) s.copy(busy = true, error = null) else s
+            }
             try {
                 finishRun()
                 _state.value = testsState(current.ecuName)
@@ -203,19 +233,35 @@ class OutputTestsViewModel(
         val run = run ?: return
         if (current.busy) return
         viewModelScope.launch {
-            _state.value = current.copy(busy = true, error = null)
+            _state.update { s ->
+                if (s is OutputTestsUiState.Running) s.copy(busy = true, error = null) else s
+            }
             try {
                 if (activate) run.activate() else run.deactivate()
-                _state.value = current.copy(active = activate, busy = false, error = null)
+                _state.update { s ->
+                    if (s is OutputTestsUiState.Running) {
+                        s.copy(active = activate, busy = false, error = null)
+                    } else {
+                        s
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.value = current.copy(busy = false, error = userMessageFor(e))
+                _state.update { s ->
+                    if (s is OutputTestsUiState.Running) {
+                        s.copy(busy = false, error = userMessageFor(e))
+                    } else {
+                        s
+                    }
+                }
             }
         }
     }
 
     private suspend fun finishRun() {
+        readoutsJob?.cancel()
+        readoutsJob = null
         run?.let { active ->
             run = null
             // Not cancellable: an interrupted teardown would leave the

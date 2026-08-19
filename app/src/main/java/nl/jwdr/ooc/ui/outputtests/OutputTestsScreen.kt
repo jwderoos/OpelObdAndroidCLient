@@ -250,6 +250,24 @@ private fun RunPanel(
             Text(label, style = MaterialTheme.typography.bodyMedium)
         }
 
+        if (state.readouts.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                state.readouts.forEach { readout ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = readout.binding.row.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = readout.display,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+            }
+        }
+
         if (state.test.type == OutputTestType.ONOFF) {
             Text(
                 text = stringResource(

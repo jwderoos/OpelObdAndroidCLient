@@ -37,7 +37,8 @@ object MeasuringBlockDecoder {
         return BlockReading(block, readings, unmapped)
     }
 
-    private fun displayFor(row: DataRow, raw: Int?): String = when {
+    /** Display text for one raw byte of [row]: state label, decimal value, or placeholder. */
+    fun displayFor(row: DataRow, raw: Int?): String = when {
         raw == null -> NO_DATA
         row.states.isNotEmpty() -> row.states.getOrNull(raw) ?: "0x%02X".format(raw)
         else -> raw.toString()

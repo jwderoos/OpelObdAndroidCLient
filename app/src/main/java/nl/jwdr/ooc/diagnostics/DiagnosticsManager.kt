@@ -4,6 +4,7 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
@@ -17,12 +18,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import nl.jwdr.ooc.catalog.BlockReading
 import nl.jwdr.ooc.catalog.DataRow
 import nl.jwdr.ooc.catalog.MeasuringBlock
 import nl.jwdr.ooc.catalog.CommandRecord
 import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
 import nl.jwdr.ooc.catalog.OutputTest
+import nl.jwdr.ooc.catalog.TagBinding
+import nl.jwdr.ooc.protocol.gmlan.GmlanServices
+import nl.jwdr.ooc.protocol.gmlan.PeriodicDataMonitor
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
 import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
@@ -169,8 +174,17 @@ class DiagnosticsManager(
      * confirmation, showing the test's pre-test instructions, first (design
      * spec safety rule). The caller must always call [OutputTestRun.finish],
      * which runs the teardown records and closes the session.
+     *
+     * [bindings] (from [nl.jwdr.ooc.catalog.DisplayTagBindings]) enable the
+     * live display-tag readouts on [OutputTestRun.readouts], decoded from the
+     * GMLAN periodic-data broadcasts on [EcuScanTarget.secondaryId] that the
+     * script's readDataByPacketIdentifier records schedule.
      */
-    suspend fun startOutputTest(target: EcuScanTarget, test: OutputTest): OutputTestRun {
+    suspend fun startOutputTest(
+        target: EcuScanTarget,
+        test: OutputTest,
+        bindings: List<TagBinding> = emptyList(),
+    ): OutputTestRun {
         val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
         val session = DiagnosticSession(
             transport,
@@ -178,10 +192,39 @@ class DiagnosticsManager(
             config = SessionConfig(),
             scope = sessionScope,
         )
+        val secondaryId = target.secondaryId
+        val monitored = bindings.isNotEmpty() && secondaryId != null
+        val readouts = MutableStateFlow(
+            if (monitored) {
+                bindings.map { TagReadout(it, raw = null, display = MeasuringBlockDecoder.NO_DATA) }
+            } else {
+                emptyList()
+            },
+        )
+        // Subscribe before the before-test records go out: the script's AA
+        // schedule record starts the broadcasts immediately.
+        if (monitored && secondaryId != null) {
+            val monitor = PeriodicDataMonitor(transport, secondaryId)
+            sessionScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                monitor.records.collect { record ->
+                    readouts.update { current ->
+                        current.map { readout ->
+                            if (readout.binding.dpid != record.dpid) return@map readout
+                            val raw = record.data.getOrNull(readout.binding.byteIndex)
+                                ?.toInt()?.and(0xFF)
+                            TagReadout(
+                                readout.binding,
+                                raw,
+                                MeasuringBlockDecoder.displayFor(readout.binding.row, raw),
+                            )
+                        }
+                    }
+                }
+            }
+        }
         try {
             for (record in test.beforeTest) {
-                if (record.significantBytes.isEmpty()) continue
-                session.execute(RawRequest(record.toPayload()))
+                session.sendRecord(record)
             }
         } catch (e: Throwable) {
             session.close()
@@ -197,7 +240,7 @@ class DiagnosticsManager(
                 transport.send(ALL_NODES_TESTER_PRESENT)
             }
         }
-        return OutputTestRun(test, session, sessionScope)
+        return OutputTestRun(test, session, sessionScope, readouts)
     }
 
     /**
@@ -346,6 +389,14 @@ class DiagnosticsManager(
 /** One scaled OBD-II reading. */
 data class Obd2Value(val pid: Obd2Pid, val value: Double, val display: String)
 
+/** One live display-tag reading shown while an output test runs. */
+data class TagReadout(
+    val binding: TagBinding,
+    /** Unsigned raw byte from the DPID broadcast, or null before the first one. */
+    val raw: Int?,
+    val display: String,
+)
+
 /**
  * The interactive phase of one running output test, created by
  * [DiagnosticsManager.startOutputTest]. Owns the diagnostic session (its
@@ -355,6 +406,8 @@ class OutputTestRun internal constructor(
     private val test: OutputTest,
     private val session: DiagnosticSession,
     private val sessionScope: CoroutineScope,
+    /** Live display-tag readings; empty when the test has no resolvable tags. */
+    val readouts: StateFlow<List<TagReadout>> = MutableStateFlow(emptyList()),
 ) {
     /** Sends the go-activate records. Repeatable (REPEAT/UPDOWN tests). */
     suspend fun activate() = send(test.goActivate)
@@ -378,11 +431,25 @@ class OutputTestRun internal constructor(
 
     private suspend fun send(records: List<CommandRecord>) {
         for (record in records) {
-            if (record.significantBytes.isEmpty()) continue
-            session.execute(RawRequest(record.toPayload()))
+            session.sendRecord(record)
         }
     }
 }
 
 private fun CommandRecord.toPayload() =
     ByteArray(significantBytes.size) { significantBytes[it].toByte() }
+
+/**
+ * Sends one catalog command record: GMLAN readDataByPacketIdentifier gets no
+ * USDT response (its reply is the UUDT stream on the secondary id), so it
+ * goes out fire-and-forget; everything else awaits its positive response.
+ */
+private suspend fun DiagnosticSession.sendRecord(record: CommandRecord) {
+    if (record.significantBytes.isEmpty()) return
+    val payload = record.toPayload()
+    if ((payload[0].toInt() and 0xFF) == GmlanServices.READ_DATA_BY_PACKET_IDENTIFIER) {
+        sendWithoutResponse(payload)
+    } else {
+        execute(RawRequest(payload))
+    }
+}

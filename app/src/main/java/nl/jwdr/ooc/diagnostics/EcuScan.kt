@@ -5,6 +5,8 @@ data class EcuScanTarget(
     val name: String,
     val requestId: Int,
     val responseId: Int,
+    /** UUDT broadcast id for GMLAN periodic data; null when unknown (OBD-II fallback). */
+    val secondaryId: Int? = null,
 )
 
 /** Outcome of probing one [EcuScanTarget]. */

@@ -65,7 +65,12 @@ class OutputTestsViewModelTest {
         return CanFrame(id, if (data.size < 8) data + ByteArray(8 - data.size) { pad } else data)
     }
 
-    private fun canEcu(name: String, requestId: Int, catalogKey: String? = null) = EcuEntity(
+    private fun canEcu(
+        name: String,
+        requestId: Int,
+        catalogKey: String? = null,
+        secondaryId: Int = 0,
+    ) = EcuEntity(
         catalogId = CatalogEntity.SINGLETON_ID,
         modelYear = "2005",
         vehicle = "Astra-H",
@@ -79,7 +84,7 @@ class OutputTestsViewModelTest {
         canBus = "HSCAN",
         bitRateTenthsKbps = 5000,
         requestId = requestId,
-        secondaryId = 0,
+        secondaryId = secondaryId,
         responseId = requestId + 8,
         baudRate = null,
         klineAddress = null,
@@ -92,6 +97,14 @@ class OutputTestsViewModelTest {
         kind = "OUTPUT_TESTS",
         fileKey = fileKey,
         fileName = "$fileKey.SCR.txt",
+        content = text.toByteArray(Charsets.ISO_8859_1),
+    )
+
+    private fun measuringBlocksFile(fileKey: String, text: String) = CatalogFileEntity(
+        catalogId = CatalogEntity.SINGLETON_ID,
+        kind = "MEASURING_BLOCKS",
+        fileKey = fileKey,
+        fileName = "$fileKey.MBF.txt",
         content = text.toByteArray(Charsets.ISO_8859_1),
     )
 
@@ -344,5 +357,68 @@ class OutputTestsViewModelTest {
 
         val state = viewModel.state.value as OutputTestsUiState.Tests
         assertNotNull(state.error)
+    }
+
+    private val taggedScriptText = """
+        ;KW2000
+        Pump Test With Readouts
+        [TESTTYPE=ONOFF]
+        [begin]
+        **PUMP**
+        BeforeTest=	0x04,0xAA,0x03,0x10,0x11,0x00,0x00,0x00,
+        BeforeTest=	0x03,0xAE,0x01,0x00,0x00,0x00,0x00,0x00,
+        GoActivate=	0x06,0xAE,0x02,0x02,0x00,0x00,0x00,0x00,
+        DeActivate=	0x06,0xAE,0x02,0x00,0x00,0x00,0x00,0x00,
+        AfterTest=	0x03,0xAE,0x01,0x0C,0x00,0x00,0x00,0x00,
+        AfterTest=	0x02,0xAA,0x00,0x00,0x00,0x00,0x00,0x00,
+        [end]
+    """.trimIndent()
+
+    private val taggedMbfText = """
+        ; synthetic
+        ##MB01=Synthetic List
+        [begin]
+        MEASDATA=03,10,11
+        DISABLE_ALL
+        ENABLE_RANGE=0001-0002
+        [end]
+
+        [MEASURING BLOCK DATA]
+        Supply Voltage,string,[V]
+        Pump Relay,string,Off,On,**PUMP**
+    """.trimIndent()
+
+    @Test
+    fun `a running test shows live display-tag readouts`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(canEcu("REC", 0x240, "RECKEY", secondaryId = 0x540)),
+            listOf(
+                outputTestsFile("RECKEY", taggedScriptText),
+                measuringBlocksFile("RECKEY", taggedMbfText),
+            ),
+        )
+        val transport = scriptedTransport(backgroundScope)
+        // The script's 4-significant-byte AA record -> single-frame PCI 0x04.
+        val scheduleFrame = frame(0x240, 0x04, 0xAA, 0x03, 0x10, 0x11)
+        transport.onFrame(scheduleFrame).respondWith(
+            CanFrame(0x540, bytes(0x10, 0x0C, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00)),
+        )
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("REC")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.requestStart(0)
+        viewModel.confirmStart()
+        settle()
+
+        val running = viewModel.state.value as OutputTestsUiState.Running
+        assertEquals(1, running.readouts.size)
+        assertEquals("Pump Relay", running.readouts[0].binding.row.label)
+        // DPID 0x10 byte 1 = 0x01 -> the "On" state label.
+        assertEquals("On", running.readouts[0].display)
+
+        viewModel.stop()
+        settle()
     }
 }

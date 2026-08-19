@@ -5,6 +5,7 @@ import nl.jwdr.ooc.protocol.isotp.IsoTpChannel
 import nl.jwdr.ooc.protocol.isotp.IsoTpConfig
 import nl.jwdr.ooc.transport.CanLog
 import nl.jwdr.ooc.transport.ReplayMode
+import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.ReplayTransport
 import org.junit.Assert.assertArrayEquals
 
@@ -21,9 +22,15 @@ import org.junit.Assert.assertArrayEquals
  *
  * Returns the executed ops for reporting.
  */
-suspend fun driveConformance(log: CanLog, scope: CoroutineScope): List<TesterOp> {
+suspend fun driveConformance(
+    log: CanLog,
+    scope: CoroutineScope,
+    /** Runs before playback starts, for tests that also observe the transport. */
+    onTransport: (ObdTransport) -> Unit = {},
+): List<TesterOp> {
     val ops = reconstructTesterOps(log)
     val transport = ReplayTransport(log, ReplayMode.FastForward, scope)
+    onTransport(transport)
     // OP-COM pads frames with 0x00 and advertises "stream everything, no
     // separation" in its flow control; the config must match the recording.
     val config = IsoTpConfig(padByte = 0x00, rxBlockSize = 0, rxSeparationTimeRaw = 0)

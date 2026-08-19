@@ -2,8 +2,10 @@ package nl.jwdr.ooc.diagnostics
 
 import kotlinx.coroutines.test.runTest
 import nl.jwdr.ooc.catalog.CommandRecord
+import nl.jwdr.ooc.catalog.DataRow
 import nl.jwdr.ooc.catalog.OutputTest
 import nl.jwdr.ooc.catalog.OutputTestType
+import nl.jwdr.ooc.catalog.TagBinding
 import nl.jwdr.ooc.protocol.session.SessionException
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
@@ -156,5 +158,92 @@ class OutputTestRunTest {
         run.finish()
 
         assertTrue(transport.sentFrames.contains(afterFrame))
+    }
+
+    @Test
+    fun `readDataByPacketIdentifier records are sent without awaiting a response`() = runTest {
+        // GMLAN $AA never answers on the diagnostic response id (its reply is
+        // the UUDT stream on the secondary id), so nothing is scripted for
+        // these frames — v1 would retry into a ResponseTimeout here.
+        // 4-byte payload -> single-frame PCI 0x04.
+        val scheduleFrame = frame(0x241, 0x04, 0xAA, 0x03, 0x10, 0x11)
+        val stopFrame = frame(0x241, 0x02, 0xAA, 0x00)
+        val transport = scriptedTransport(backgroundScope)
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        val withPeriodicData = test.copy(
+            beforeTest = listOf(record(0xAA, 0x03, 0x10, 0x11)) + test.beforeTest,
+            afterTest = test.afterTest + listOf(record(0xAA, 0x00)),
+        )
+
+        val run = manager.startOutputTest(rec, withPeriodicData)
+        run.finish()
+
+        assertTrue(transport.sentFrames.contains(scheduleFrame))
+        assertTrue(transport.sentFrames.contains(stopFrame))
+        assertTrue(transport.sentFrames.contains(beforeFrame))
+        assertTrue(transport.sentFrames.contains(afterFrame))
+    }
+
+    @Test
+    fun `periodic data broadcasts update the tag readouts`() = runTest {
+        val transport = scriptedTransport(backgroundScope)
+        // The schedule request "answers" with UUDT broadcasts on the
+        // secondary id — DPID byte first, then 7 data bytes, no padding.
+        val scheduleFrame = frame(0x241, 0x04, 0xAA, 0x03, 0x10, 0x11)
+        transport.onFrame(scheduleFrame).respondWith(
+            CanFrame(0x541, bytes(0x10, 0x0C, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00)),
+            CanFrame(0x541, bytes(0x11, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)),
+        )
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        val pumpRow = DataRow(label = "Pump Relay", states = listOf("Off", "On"))
+        val motorRow = DataRow(label = "Motor State", states = listOf("Idle", "Moving"))
+        val bindings = listOf(
+            TagBinding("PUMP", pumpRow, dpid = 0x10, byteIndex = 1),
+            TagBinding("MOTOR", motorRow, dpid = 0x11, byteIndex = 0),
+        )
+        val withPeriodicData = test.copy(
+            beforeTest = listOf(record(0xAA, 0x03, 0x10, 0x11)) + test.beforeTest,
+            displayTags = listOf("PUMP", "MOTOR"),
+        )
+        val target = rec.copy(secondaryId = 0x541)
+
+        val run = manager.startOutputTest(target, withPeriodicData, bindings)
+        testScheduler.runCurrent()
+        val readouts = run.readouts.value
+        run.finish()
+
+        assertEquals(listOf("On", "Moving"), readouts.map { it.display })
+        assertEquals(listOf(0x01, 0x01), readouts.map { it.raw })
+    }
+
+    @Test
+    fun `without bindings the readouts stay empty`() = runTest {
+        val transport = scriptedTransport(backgroundScope)
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+
+        val run = manager.startOutputTest(rec, test)
+        val readouts = run.readouts.value
+        run.finish()
+
+        assertEquals(emptyList<TagReadout>(), readouts)
+    }
+
+    @Test
+    fun `bindings without a secondary id leave the readouts empty`() = runTest {
+        val transport = scriptedTransport(backgroundScope)
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        val pumpRow = DataRow(label = "Pump Relay", states = listOf("Off", "On"))
+        val bindings = listOf(TagBinding("PUMP", pumpRow, dpid = 0x10, byteIndex = 1))
+
+        val run = manager.startOutputTest(rec, test, bindings)
+        testScheduler.runCurrent()
+        val readouts = run.readouts.value
+        run.finish()
+
+        assertEquals(emptyList<TagReadout>(), readouts)
     }
 }
