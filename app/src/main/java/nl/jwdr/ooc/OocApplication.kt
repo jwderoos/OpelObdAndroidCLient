@@ -3,17 +3,25 @@ package nl.jwdr.ooc
 import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.Intent
+import android.util.Log
+import androidx.core.content.ContextCompat
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import nl.jwdr.ooc.catalogstore.CatalogDatabase
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.TransportSelection
+import nl.jwdr.ooc.service.ConnectionHolderService
+import nl.jwdr.ooc.service.shouldRunConnectionHolder
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
@@ -62,6 +70,29 @@ class AppContainer(context: Context) {
         DiagnosticsManager(switchableTransport)
     }
 
+    init {
+        applicationScope.launch {
+            combine(
+                diagnosticsManager.connectionState,
+                diagnosticsManager.isSimulated,
+                ::shouldRunConnectionHolder,
+            ).distinctUntilChanged().collect(::applyConnectionHolderState)
+        }
+    }
+
+    private fun applyConnectionHolderState(shouldRun: Boolean) {
+        val intent = Intent(appContext, ConnectionHolderService::class.java)
+        if (shouldRun) {
+            try {
+                ContextCompat.startForegroundService(appContext, intent)
+            } catch (e: Exception) {
+                Log.w(LOG_TAG, "failed to start ConnectionHolderService", e)
+            }
+        } else {
+            appContext.stopService(intent)
+        }
+    }
+
     /**
      * Applies and persists a new adapter choice. Only valid while
      * disconnected; [SwitchableObdTransport.switchTo] enforces that.
@@ -94,6 +125,7 @@ class AppContainer(context: Context) {
 
     private companion object {
         const val PREF_SELECTION = "selection"
+        const val LOG_TAG = "AppContainer"
     }
 }
 
@@ -180,4 +212,9 @@ private fun FakeEcuTransport.scriptDemoObd2Responses() {
 
 class OocApplication : Application() {
     val container: AppContainer by lazy { AppContainer(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        ConnectionHolderService.createNotificationChannel(this)
+    }
 }

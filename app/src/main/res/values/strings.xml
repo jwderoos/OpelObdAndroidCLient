@@ -99,4 +99,9 @@
     <string name="error_transport_lost">Connection to the adapter was lost.</string>
     <string name="error_session_closed">The diagnostic session was closed.</string>
     <string name="error_generic_communication">Communication with the vehicle failed.</string>
+
+    <!-- Foreground connection holder (#20) -->
+    <string name="connection_holder_channel_name">Vehicle connection</string>
+    <string name="connection_holder_notification_title">OpelOBD</string>
+    <string name="connection_holder_notification_text">Connected to vehicle</string>
 </resources>
