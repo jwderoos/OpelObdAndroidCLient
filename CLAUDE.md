@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Do not use git worktrees** (no `EnterWorktree`, no `isolation: "worktree"` for agents, no manual `git worktree` commands). Work directly in this checkout.
 - **No-vendor-data policy (this repo is public, kept clean-room):** never commit vendor data, keys, decoded catalogs, recorded real-vehicle logs, or proprietary seed/key algorithms. Only algorithms, format documentation, and small synthetic test fixtures are committed. `/logs/` and `/DebugFiles/` are git-ignored on purpose — leave them local.
-
+- **Do not commit** - `git add` the files, and end the session with a proposed git commit message. The user will do the actual commit
 ## Commands
 
 Requires JDK 17. The `:core:*` modules are plain Kotlin/JVM (no Android SDK needed); only `:app` needs the Android SDK.

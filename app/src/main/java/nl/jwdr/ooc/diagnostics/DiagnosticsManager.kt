@@ -2,6 +2,7 @@ package nl.jwdr.ooc.diagnostics
 
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -19,11 +20,14 @@ import kotlinx.coroutines.flow.map
 import nl.jwdr.ooc.catalog.BlockReading
 import nl.jwdr.ooc.catalog.DataRow
 import nl.jwdr.ooc.catalog.MeasuringBlock
+import nl.jwdr.ooc.catalog.CommandRecord
 import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
+import nl.jwdr.ooc.catalog.OutputTest
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
 import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
+import nl.jwdr.ooc.protocol.kwp2000.RawRequest
 import nl.jwdr.ooc.protocol.kwp2000.ReadDataByLocalIdentifier
 import nl.jwdr.ooc.protocol.obd2.ClearEmissionData
 import nl.jwdr.ooc.protocol.obd2.Obd2Pid
@@ -159,6 +163,44 @@ class DiagnosticsManager(
     }
 
     /**
+     * Starts one catalog output test on [target]: opens a session, runs the
+     * test's before-test records, and returns a handle for the interactive
+     * phase. Actuates vehicle hardware: callers must obtain explicit user
+     * confirmation, showing the test's pre-test instructions, first (design
+     * spec safety rule). The caller must always call [OutputTestRun.finish],
+     * which runs the teardown records and closes the session.
+     */
+    suspend fun startOutputTest(target: EcuScanTarget, test: OutputTest): OutputTestRun {
+        val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
+        val session = DiagnosticSession(
+            transport,
+            IsoTpAddress(target.requestId, target.responseId),
+            config = SessionConfig(),
+            scope = sessionScope,
+        )
+        try {
+            for (record in test.beforeTest) {
+                if (record.significantBytes.isEmpty()) continue
+                session.execute(RawRequest(record.toPayload()))
+            }
+        } catch (e: Throwable) {
+            session.close()
+            sessionScope.cancel()
+            throw e
+        }
+        // Recorded sessions hold the test mode with the periodic GMLAN
+        // all-nodes testerPresent broadcast (the ECU's 7E answers on the
+        // diagnostic id are skipped as stale replies), not a per-ECU 3E.
+        sessionScope.launch {
+            while (true) {
+                delay(ALL_NODES_TESTER_PRESENT_INTERVAL)
+                transport.send(ALL_NODES_TESTER_PRESENT)
+            }
+        }
+        return OutputTestRun(test, session, sessionScope)
+    }
+
+    /**
      * Sends the functional mode 01 PID 00 probe on 0x7DF and returns a target
      * per ISO 15765-4 ECU that answers (0x7E8..0x7EF, physical request ID 8
      * below). This is the entry point of the no-catalog OBD-II fallback;
@@ -290,8 +332,57 @@ class DiagnosticsManager(
             byteArrayOf(0x02, 0x01, 0x00) + ByteArray(5) { 0xAA.toByte() }
 
         val OBD2_DISCOVERY_WINDOW = 500.milliseconds
+
+        /** GMLAN all-nodes testerPresent, byte for byte as recorded. */
+        val ALL_NODES_TESTER_PRESENT = CanFrame(
+            0x101,
+            byteArrayOf(0xFE.toByte(), 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00),
+        )
+
+        val ALL_NODES_TESTER_PRESENT_INTERVAL = 2.seconds
     }
 }
 
 /** One scaled OBD-II reading. */
 data class Obd2Value(val pid: Obd2Pid, val value: Double, val display: String)
+
+/**
+ * The interactive phase of one running output test, created by
+ * [DiagnosticsManager.startOutputTest]. Owns the diagnostic session (its
+ * tester-present keep-alive holds the test mode) until [finish].
+ */
+class OutputTestRun internal constructor(
+    private val test: OutputTest,
+    private val session: DiagnosticSession,
+    private val sessionScope: CoroutineScope,
+) {
+    /** Sends the go-activate records. Repeatable (REPEAT/UPDOWN tests). */
+    suspend fun activate() = send(test.goActivate)
+
+    /** Sends the de-activate records. Repeatable. */
+    suspend fun deactivate() = send(test.deActivate)
+
+    /**
+     * Runs the teardown records and closes the session. Must always be
+     * called, also after a failed [activate]/[deactivate], so the ECU is
+     * returned to its normal state.
+     */
+    suspend fun finish() {
+        try {
+            send(test.afterTest)
+        } finally {
+            session.close()
+            sessionScope.cancel()
+        }
+    }
+
+    private suspend fun send(records: List<CommandRecord>) {
+        for (record in records) {
+            if (record.significantBytes.isEmpty()) continue
+            session.execute(RawRequest(record.toPayload()))
+        }
+    }
+}
+
+private fun CommandRecord.toPayload() =
+    ByteArray(significantBytes.size) { significantBytes[it].toByte() }

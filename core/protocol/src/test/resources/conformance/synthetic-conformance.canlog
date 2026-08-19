@@ -23,3 +23,7 @@
 
 # unsolicited extra response message on the first ECU's diagnostic id
 0 rx 641 02 5a 99 00 00 00 00 00
+
+# output-test device control: single-frame 0xAE request, 0xEE echo
+0 tx 241 06 ae 02 02 00 00 00 00
+0 rx 641 02 ee 02 00 00 00 00 00

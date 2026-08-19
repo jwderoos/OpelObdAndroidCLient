@@ -10,7 +10,7 @@ enum class OutputTestType { ONOFF, UPDOWN, REPEAT }
  */
 data class CommandRecord(val bytes: List<Int>) {
     val significantBytes: List<Int>
-        get() = bytes.drop(1).take(bytes.first())
+        get() = bytes.drop(1).take(bytes.firstOrNull() ?: 0)
 }
 
 /** One actuator test from an `OutputTests/<KEY>.SCR.txt` file. */

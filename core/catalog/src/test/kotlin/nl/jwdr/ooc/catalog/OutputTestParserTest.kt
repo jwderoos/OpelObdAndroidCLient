@@ -71,6 +71,12 @@ class OutputTestParserTest {
     }
 
     @Test
+    fun `an empty or zero-count command record has no significant bytes`() {
+        assertEquals(emptyList<Int>(), CommandRecord(emptyList()).significantBytes)
+        assertEquals(emptyList<Int>(), CommandRecord(List(8) { 0 }).significantBytes)
+    }
+
+    @Test
     fun `reports unknown test type`() {
         try {
             OutputTestParser.parse("T\n[TESTTYPE=WOBBLE]\n[begin]\n[end]\n", "WOBBLE.SCR.txt")

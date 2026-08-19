@@ -26,7 +26,7 @@ class SyntheticConformanceTest {
     fun `reconstructs the tester operations of the fixture`() {
         val ops = reconstructTesterOps(fixture())
 
-        assertEquals(7, ops.size)
+        assertEquals(9, ops.size)
         assertEquals(0x101, (ops[0] as TesterOp.RawSend).frame.id)
         (ops[1] as TesterOp.Send).let {
             assertEquals(IsoTpAddress(0x242, 0x642), it.address)
@@ -52,13 +52,23 @@ class SyntheticConformanceTest {
             assertEquals(IsoTpAddress(0x241, 0x641), it.address)
             assertArrayEquals(bytes(0x5A, 0x99), it.payload)
         }
+        // Output-test device control exchange (as recorded on body ECUs:
+        // single-frame 0xAE request, 0xEE echo of the device id).
+        (ops[7] as TesterOp.Send).let {
+            assertEquals(IsoTpAddress(0x241, 0x641), it.address)
+            assertArrayEquals(bytes(0xAE, 0x02, 0x02, 0x00, 0x00, 0x00), it.payload)
+        }
+        (ops[8] as TesterOp.Expect).let {
+            assertEquals(IsoTpAddress(0x241, 0x641), it.address)
+            assertArrayEquals(bytes(0xEE, 0x02), it.payload)
+        }
     }
 
     @Test
     fun `replays the fixture through the protocol stack`() = runTest {
         val ops = driveConformance(fixture(), backgroundScope)
 
-        assertEquals(7, ops.size)
+        assertEquals(9, ops.size)
     }
 
     @Test

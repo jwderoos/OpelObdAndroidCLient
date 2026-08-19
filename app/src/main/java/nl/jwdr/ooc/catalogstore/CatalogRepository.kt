@@ -12,6 +12,8 @@ import nl.jwdr.ooc.catalog.FaultCodeCatalog
 import nl.jwdr.ooc.catalog.FaultCodeParser
 import nl.jwdr.ooc.catalog.MeasuringBlockCatalog
 import nl.jwdr.ooc.catalog.MeasuringBlockParser
+import nl.jwdr.ooc.catalog.OutputTestCatalog
+import nl.jwdr.ooc.catalog.OutputTestParser
 
 /** What the UI shows about the stored catalog. */
 data class CatalogSummary(
@@ -74,6 +76,17 @@ class CatalogRepository(
         val file = dao.filesFor(CatalogFileKind.MEASURING_BLOCKS.name, catalogKey).firstOrNull()
             ?: return null
         return MeasuringBlockParser.parse(CatalogText.decode(file.content), file.fileName)
+    }
+
+    /**
+     * The parsed output tests of [catalogKey]; null when the catalog has no
+     * output-test file for the key. Like measuring blocks, variant files are
+     * not merged; the first file wins.
+     */
+    suspend fun outputTestsFor(catalogKey: String): OutputTestCatalog? {
+        val file = dao.filesFor(CatalogFileKind.OUTPUT_TESTS.name, catalogKey).firstOrNull()
+            ?: return null
+        return OutputTestParser.parse(CatalogText.decode(file.content), file.fileName)
     }
 
     suspend fun faultCodesFor(catalogKey: String): FaultCodeCatalog? {

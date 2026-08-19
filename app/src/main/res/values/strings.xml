@@ -70,6 +70,26 @@
     <string name="live_data_logging">Recording to CSV…</string>
     <string name="live_data_csv_saved">CSV saved: %1$s</string>
 
+    <!-- Output tests (#16) -->
+    <string name="output_tests_no_vehicle">Select a vehicle on the ECU list screen to run its output tests.</string>
+    <string name="output_tests_pick_ecu">Choose a control unit</string>
+    <string name="output_tests_none">The catalog lists no output tests for this control unit.</string>
+    <string name="output_tests_starting">Preparing test…</string>
+    <string name="output_tests_busy">Sending command…</string>
+    <string name="output_test_dialog_title">Start output test?</string>
+    <string name="output_test_dialog_message">This actuates vehicle hardware. Make sure the preconditions below are met before starting.</string>
+    <string name="output_test_dialog_no_instructions">The catalog lists no preconditions for this test. Only start it when you know its effect.</string>
+    <string name="output_test_dialog_confirm">Start</string>
+    <string name="output_test_dialog_cancel">Cancel</string>
+    <string name="output_test_activate">Activate</string>
+    <string name="output_test_deactivate">Deactivate</string>
+    <string name="output_test_trigger">Trigger</string>
+    <string name="output_test_up">Increase</string>
+    <string name="output_test_down">Decrease</string>
+    <string name="output_test_active">Output is activated</string>
+    <string name="output_test_inactive">Output is deactivated</string>
+    <string name="action_stop_test">Stop test</string>
+
     <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
     <string name="error_response_timeout">The control unit did not respond in time.</string>
     <string name="error_negative_response">The control unit rejected the request (%1$s).</string>
