@@ -64,6 +64,22 @@ class MeasuringBlockDecoderTest {
     }
 
     @Test
+    fun `a nullable record decodes gaps as no-data between present bytes`() {
+        val reading = MeasuringBlockDecoder.decode(block, rows, listOf(0x5A, null, 0x0E))
+        assertEquals(0x5A, reading.rows[0].raw)
+        assertNull(reading.rows[1].raw)
+        assertEquals("—", reading.rows[1].display)
+        assertEquals(0x0E, reading.rows[2].raw)
+        assertEquals("14", reading.rows[2].display)
+    }
+
+    @Test
+    fun `surplus nullable record bytes surface only the present values`() {
+        val reading = MeasuringBlockDecoder.decode(block, rows, listOf(0x5A, 0x01, 0x0E, 0x22, null))
+        assertEquals(listOf(0x22), reading.unmappedBytes.map { it.toInt() and 0xFF })
+    }
+
+    @Test
     fun `raw values are unsigned`() {
         val reading = MeasuringBlockDecoder.decode(block, rows, byteArrayOf(0xF0.toByte(), 0x00, 0x00))
         assertEquals(0xF0, reading.rows[0].raw)

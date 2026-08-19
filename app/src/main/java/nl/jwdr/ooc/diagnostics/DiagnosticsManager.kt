@@ -11,6 +11,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import nl.jwdr.ooc.catalog.BlockReading
 import nl.jwdr.ooc.catalog.DataRow
+import nl.jwdr.ooc.catalog.DisplayTagBindings
 import nl.jwdr.ooc.catalog.MeasuringBlock
 import nl.jwdr.ooc.catalog.CommandRecord
 import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
@@ -33,7 +36,6 @@ import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
 import nl.jwdr.ooc.protocol.kwp2000.RawRequest
-import nl.jwdr.ooc.protocol.kwp2000.ReadDataByLocalIdentifier
 import nl.jwdr.ooc.protocol.obd2.ClearEmissionData
 import nl.jwdr.ooc.protocol.obd2.Obd2Pid
 import nl.jwdr.ooc.protocol.obd2.Obd2Pids
@@ -143,11 +145,14 @@ class DiagnosticsManager(
         }
 
     /**
-     * Polls one measuring block at a fixed [interval] and emits a decoded
-     * reading per cycle: each MEASDATA identifier is read via
-     * readDataByLocalIdentifier and the records are concatenated in MEASDATA
-     * order before decoding. One session spans the whole poll; it ends when
-     * the collector cancels.
+     * Polls one measuring block and emits a decoded reading per [interval]:
+     * one GMLAN readDataByPacketIdentifier request schedules the block's
+     * MEASDATA verbatim (scheduling-rate byte + DPID ids, as recorded
+     * sessions show — issue #25), the values arrive as UUDT broadcasts on
+     * [EcuScanTarget.secondaryId] at [DisplayTagBindings.ROWS_PER_DPID] data
+     * bytes per DPID, and each reading decodes the latest broadcast of every
+     * DPID (rows of DPIDs not yet seen read as no-data). One session spans
+     * the whole poll; when the collector cancels, `AA 00` stops the schedule.
      */
     fun pollMeasuringBlock(
         target: EcuScanTarget,
@@ -155,14 +160,43 @@ class DiagnosticsManager(
         rows: List<DataRow>,
         interval: Duration,
     ): Flow<BlockReading> = flow {
+        val secondaryId = requireNotNull(target.secondaryId) {
+            "${target.name}: GMLAN live data needs the ECU's secondary CAN id"
+        }
+        val dpids = block.measData.drop(1)
+        require(dpids.isNotEmpty()) {
+            "block ${block.number}: MEASDATA has no DPID ids after the rate byte"
+        }
         withSession(target, SessionConfig()) { session ->
-            while (true) {
-                var record = ByteArray(0)
-                for (lid in block.measData) {
-                    record += session.execute(ReadDataByLocalIdentifier(lid)).record
+            coroutineScope {
+                val latest = MutableStateFlow(emptyMap<Int, ByteArray>())
+                // UNDISPATCHED: subscribed before the schedule request goes out.
+                val monitor = launch(start = CoroutineStart.UNDISPATCHED) {
+                    PeriodicDataMonitor(transport, secondaryId).records.collect { record ->
+                        if (record.dpid in dpids) latest.update { it + (record.dpid to record.data) }
+                    }
                 }
-                emit(MeasuringBlockDecoder.decode(block, rows, record))
-                delay(interval)
+                try {
+                    session.sendWithoutResponse(
+                        byteArrayOf(GmlanServices.READ_DATA_BY_PACKET_IDENTIFIER.toByte()) +
+                            block.measData.map(Int::toByte).toByteArray(),
+                    )
+                    while (true) {
+                        delay(interval)
+                        val record = dpids.flatMap { dpid ->
+                            val data = latest.value[dpid]
+                            List(DisplayTagBindings.ROWS_PER_DPID) { index ->
+                                data?.getOrNull(index)?.toInt()?.and(0xFF)
+                            }
+                        }
+                        emit(MeasuringBlockDecoder.decode(block, rows, record))
+                    }
+                } finally {
+                    monitor.cancel()
+                    withContext(NonCancellable) {
+                        runCatching { session.sendWithoutResponse(STOP_PERIODIC_DATA) }
+                    }
+                }
             }
         }
     }
@@ -383,6 +417,12 @@ class DiagnosticsManager(
         )
 
         val ALL_NODES_TESTER_PRESENT_INTERVAL = 2.seconds
+
+        /** readDataByPacketIdentifier rate 0: stop the periodic-data schedule. */
+        val STOP_PERIODIC_DATA = byteArrayOf(
+            GmlanServices.READ_DATA_BY_PACKET_IDENTIFIER.toByte(),
+            0x00,
+        )
     }
 }
 

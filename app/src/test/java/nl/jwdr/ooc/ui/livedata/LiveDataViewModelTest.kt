@@ -1,5 +1,6 @@
 package nl.jwdr.ooc.ui.livedata
 
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -67,9 +68,19 @@ class LiveDataViewModelTest {
         return CanFrame(id, if (data.size < 8) data + ByteArray(8 - data.size) { pad } else data)
     }
 
-    private fun readRequest(requestId: Int, lid: Int) = frame(requestId, 0x02, 0x21, lid)
+    /** The single-frame `AA <rate> <dpid>` schedule request for the ENG fixture. */
+    private val scheduleRequest = frame(0x7E0, 0x03, 0xAA, 0x03, 0x04)
 
-    private fun canEcu(name: String, requestId: Int, catalogKey: String? = null) = EcuEntity(
+    /** One UUDT broadcast of the fixture's DPID 0x04 on the secondary id. */
+    private fun engineBroadcast(temperature: Int, relay: Int = 0x01) =
+        frame(0x5E8, 0x04, temperature, relay, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+    private fun canEcu(
+        name: String,
+        requestId: Int,
+        catalogKey: String? = null,
+        secondaryId: Int = requestId + 8 - 0x200,
+    ) = EcuEntity(
         catalogId = CatalogEntity.SINGLETON_ID,
         modelYear = "2005",
         vehicle = "Astra-H",
@@ -83,7 +94,7 @@ class LiveDataViewModelTest {
         canBus = "HSCAN",
         bitRateTenthsKbps = 5000,
         requestId = requestId,
-        secondaryId = 0,
+        secondaryId = secondaryId,
         responseId = requestId + 8,
         baudRate = null,
         klineAddress = null,
@@ -99,7 +110,7 @@ class LiveDataViewModelTest {
         content = """
             ##MB01=Data List 1
             [begin]
-            MEASDATA=04,
+            MEASDATA=03,04
             DISABLE_ALL
             ENABLE_RANGE=0001-0002
             [end]
@@ -198,17 +209,17 @@ class LiveDataViewModelTest {
     fun `selecting a block polls it and shows decoded rows`() = runTest(dispatcher) {
         storeEngineWithBlocks()
         val transport = FakeEcuTransport(backgroundScope)
-        var temperature = 0x50
-        transport.onFrame(readRequest(0x7E0, 0x04)).respondBy {
-            listOf(frame(0x7E8, 0x04, 0x61, 0x04, temperature++, 0x01))
-        }
+        transport.onFrame(scheduleRequest).respondWith(
+            0.milliseconds to engineBroadcast(0x50),
+            600.milliseconds to engineBroadcast(0x51),
+        )
         val viewModel = viewModel(transport)
         dispatcher.scheduler.advanceUntilIdle()
         viewModel.selectEcu("Engine")
         dispatcher.scheduler.advanceUntilIdle()
 
         viewModel.selectBlock(1)
-        dispatcher.scheduler.advanceTimeBy(100)
+        dispatcher.scheduler.advanceTimeBy(500)
         dispatcher.scheduler.runCurrent()
 
         val first = viewModel.state.value as LiveDataUiState.Live
@@ -232,10 +243,7 @@ class LiveDataViewModelTest {
     fun `numeric rows accumulate chart samples`() = runTest(dispatcher) {
         storeEngineWithBlocks()
         val transport = FakeEcuTransport(backgroundScope)
-        var temperature = 0x50
-        transport.onFrame(readRequest(0x7E0, 0x04)).respondBy {
-            listOf(frame(0x7E8, 0x04, 0x61, 0x04, temperature++, 0x01))
-        }
+        transport.onFrame(scheduleRequest).respondWith(engineBroadcast(0x50))
         val viewModel = viewModel(transport)
         dispatcher.scheduler.advanceUntilIdle()
         viewModel.selectEcu("Engine")
@@ -255,12 +263,12 @@ class LiveDataViewModelTest {
 
     @Test
     fun `a failing poll surfaces a user-readable error`() = runTest(dispatcher) {
-        storeEngineWithBlocks()
-        val transport = FakeEcuTransport(backgroundScope)
-        // 7F 21 11: serviceNotSupported.
-        transport.onFrame(readRequest(0x7E0, 0x04))
-            .respondWith(frame(0x7E8, 0x03, 0x7F, 0x21, 0x11))
-        val viewModel = viewModel(transport)
+        // No secondary CAN id: GMLAN live data cannot schedule periodic data.
+        storeCatalog(
+            ecus = listOf(canEcu("Engine", 0x7E0, catalogKey = "ENG", secondaryId = 0)),
+            files = listOf(measuringBlocksFile("ENG")),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
         viewModel.selectEcu("Engine")
         dispatcher.scheduler.advanceUntilIdle()
@@ -270,17 +278,14 @@ class LiveDataViewModelTest {
 
         val state = viewModel.state.value as LiveDataUiState.Live
         assertFalse(state.polling)
-        assertEquals(R.string.error_negative_response, state.error!!.resId)
+        assertEquals(R.string.error_generic_communication, state.error!!.resId)
     }
 
     @Test
     fun `logging captures each reading and saving returns the CSV path`() = runTest(dispatcher) {
         storeEngineWithBlocks()
         val transport = FakeEcuTransport(backgroundScope)
-        var temperature = 0x50
-        transport.onFrame(readRequest(0x7E0, 0x04)).respondBy {
-            listOf(frame(0x7E8, 0x04, 0x61, 0x04, temperature++, 0x01))
-        }
+        transport.onFrame(scheduleRequest).respondWith(engineBroadcast(0x50))
         val viewModel = viewModel(transport)
         dispatcher.scheduler.advanceUntilIdle()
         viewModel.selectEcu("Engine")
@@ -315,9 +320,7 @@ class LiveDataViewModelTest {
     fun `changing the block stops polling and returns to the block picker`() = runTest(dispatcher) {
         storeEngineWithBlocks()
         val transport = FakeEcuTransport(backgroundScope)
-        transport.onFrame(readRequest(0x7E0, 0x04)).respondBy {
-            listOf(frame(0x7E8, 0x04, 0x61, 0x04, 0x50, 0x01))
-        }
+        transport.onFrame(scheduleRequest).respondWith(engineBroadcast(0x50))
         val viewModel = viewModel(transport)
         dispatcher.scheduler.advanceUntilIdle()
         viewModel.selectEcu("Engine")

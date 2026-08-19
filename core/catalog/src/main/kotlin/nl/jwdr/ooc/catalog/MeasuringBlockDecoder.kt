@@ -28,13 +28,21 @@ object MeasuringBlockDecoder {
 
     const val NO_DATA = "—"
 
-    fun decode(block: MeasuringBlock, rows: List<DataRow>, record: ByteArray): BlockReading {
+    fun decode(block: MeasuringBlock, rows: List<DataRow>, record: ByteArray): BlockReading =
+        decode(block, rows, record.map { it.toInt() and 0xFF })
+
+    /**
+     * Nullable-record variant for periodic-data sources where some positions
+     * have no value yet (their DPID has not broadcast): those rows read as
+     * no-data instead of shifting later bytes.
+     */
+    fun decode(block: MeasuringBlock, rows: List<DataRow>, record: List<Int?>): BlockReading {
         val readings = rows.mapIndexed { index, row ->
-            val raw = record.getOrNull(index)?.toInt()?.and(0xFF)
+            val raw = record.getOrNull(index)
             RowReading(row, raw, displayFor(row, raw))
         }
-        val unmapped = if (record.size > rows.size) record.copyOfRange(rows.size, record.size) else ByteArray(0)
-        return BlockReading(block, readings, unmapped)
+        val unmapped = record.drop(rows.size).filterNotNull()
+        return BlockReading(block, readings, ByteArray(unmapped.size) { unmapped[it].toByte() })
     }
 
     /** Display text for one raw byte of [row]: state label, decimal value, or placeholder. */

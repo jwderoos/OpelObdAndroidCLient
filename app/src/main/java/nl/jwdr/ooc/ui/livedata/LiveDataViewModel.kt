@@ -173,7 +173,12 @@ class LiveDataViewModel(
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
                     diagnosticsManager.connect()
                 }
-                val target = EcuScanTarget(definition.name, address.requestId, address.responseId)
+                val target = EcuScanTarget(
+                    definition.name,
+                    address.requestId,
+                    address.responseId,
+                    secondaryId = address.secondaryId.takeIf { it != 0 },
+                )
                 diagnosticsManager.pollMeasuringBlock(target, block, rows, POLL_INTERVAL)
                     .collect { reading -> onReading(definition.name, reading) }
             } catch (e: CancellationException) {

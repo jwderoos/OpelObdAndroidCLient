@@ -121,10 +121,12 @@ ENABLE_RANGE=0018-0050
 - `##MB<nn>=<title>` — block number (two digits, 1-based) and display title.
 - `[begin]` / `[end]` bracket the block body.
 - `MEASDATA=` — comma-separated hex bytes (no `0x` prefix), with a trailing
-  comma allowed. These are the identifier bytes the tester requests to
-  populate the block; observed values fit KWP2000
-  ReadDataByLocalIdentifier local IDs. The exact request framing is
-  established per-protocol from recorded sessions, not from this file.
+  comma allowed. For GMLAN/CAN ECUs, recorded sessions establish these as
+  the body of one readDataByPacketIdentifier request: a scheduling-rate
+  byte followed by DPID ids (`AA <rate> <dpids…>`). The scheduled values
+  arrive as UUDT broadcasts on the ECU's secondary CAN id, one frame per
+  DPID with seven data bytes, and the block's enabled rows map onto those
+  frames in table order at seven rows per DPID.
 - `DISABLE_ALL` — flag line: start with every data row hidden.
 - `ENABLE_RANGE=<from>-<to>` — 4-digit, 1-based, inclusive row range into the
   data table below: these rows are shown for this block.
@@ -289,8 +291,8 @@ source file's hash and import date; re-import replaces the stored catalog
 
 ## Open questions (to resolve against recorded sessions)
 
-- Exact role of the secondary CAN ID (field 10) in `opeldata.txt`.
-- Semantics of the `MEASDATA` byte list beyond "identifiers to request".
+- Exact role of the secondary CAN ID (field 10) in `opeldata.txt` beyond
+  carrying the GMLAN periodic-data (UUDT) broadcasts.
 - Meaning of `ID=` values in MBF / error-code files.
 - The `[DID_begin]` pair-to-row mapping in variant-coding tables.
 - Field 9 of K-line records in `opeldata.txt`.
