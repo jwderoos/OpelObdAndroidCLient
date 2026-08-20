@@ -2,6 +2,7 @@ package nl.jwdr.ooc.transport.opcom
 
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.ConnectionState
+import java.io.IOException
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -130,6 +131,21 @@ class OpComTransportTest {
             .exceptionOrNull()
         assertTrue("expected IllegalStateException, got $e", e is IllegalStateException)
         job.cancel()
+    }
+
+    @Test
+    fun `a read error on the background reader does not crash - state becomes Error`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        // Simulates the real UsbSerialOpComLink: the underlying port is closed (e.g. by a
+        // concurrent teardown) while the reader coroutine is blocked inside a non-cancellable
+        // synchronous read, so it observes an IOException rather than a CancellationException.
+        link.failPendingRead(IOException("Connection closed"))
+        yield() // let the reader coroutine hit the failure
+
+        assertTrue(transport.state.value is ConnectionState.Error)
     }
 
     @Test

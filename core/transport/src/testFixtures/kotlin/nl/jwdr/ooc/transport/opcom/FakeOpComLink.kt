@@ -44,6 +44,15 @@ class FakeOpComLink : OpComLink {
         incoming.trySend(bytes)
     }
 
+    /**
+     * Simulates the underlying link reporting an I/O error on whatever [read] call is
+     * currently suspended (or the next one) — e.g. a USB port that was closed out from under
+     * an in-flight blocking read, rather than the reader coroutine being cancelled.
+     */
+    fun failPendingRead(error: Throwable) {
+        incoming.close(error)
+    }
+
     override suspend fun open() {
         opened = true
         openCount++

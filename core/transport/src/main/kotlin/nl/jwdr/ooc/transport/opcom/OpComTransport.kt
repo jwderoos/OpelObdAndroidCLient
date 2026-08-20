@@ -2,6 +2,7 @@ package nl.jwdr.ooc.transport.opcom
 
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -121,14 +122,27 @@ class OpComTransport(
         }
     }
 
+    /**
+     * Runs for the life of the connection. [link] may be a blocking synchronous USB read
+     * underneath (see [nl.jwdr.ooc.transport.opcom.OpComLink]'s Android implementation): a
+     * concurrent [teardown] closing the port races an in-flight [OpComLink.read] rather than
+     * cancelling it, so this must treat that failure as an ordinary disconnect, not let it
+     * escape uncaught and take the whole app down with it.
+     */
     private suspend fun readLoop() {
-        while (true) {
-            val chunk = link.read()
-            val (records, rest) = OpComFrameCodec.readRecords(readBuffer + chunk)
-            readBuffer = rest
-            for (payload in records) {
-                dispatch(OpComFrameCodec.decodeRecord(payload))
+        try {
+            while (true) {
+                val chunk = link.read()
+                val (records, rest) = OpComFrameCodec.readRecords(readBuffer + chunk)
+                readBuffer = rest
+                for (payload in records) {
+                    dispatch(OpComFrameCodec.decodeRecord(payload))
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            _state.value = ConnectionState.Error(e)
         }
     }
 
