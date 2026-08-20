@@ -4,6 +4,7 @@ import android.app.Application
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.usb.UsbManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -20,6 +21,7 @@ import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.TransportSelection
+import nl.jwdr.ooc.diagnostics.UsbSerialOpComLink
 import nl.jwdr.ooc.service.ConnectionHolderService
 import nl.jwdr.ooc.service.shouldRunConnectionHolder
 import nl.jwdr.ooc.transport.CanFrame
@@ -27,6 +29,7 @@ import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
 import nl.jwdr.ooc.transport.elm327.Elm327Transport
+import nl.jwdr.ooc.transport.opcom.OpComTransport
 import nl.jwdr.ooc.ui.livedata.FileLiveDataCsvStore
 import nl.jwdr.ooc.ui.livedata.LiveDataCsvStore
 
@@ -116,6 +119,14 @@ class AppContainer(context: Context) {
             val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
                 ?: throw IllegalArgumentException("device has no Bluetooth adapter")
             Elm327Transport(BluetoothSppLink(adapter.getRemoteDevice(selection.address)))
+        }
+        TransportSelection.OpComUsb -> {
+            val usbManager = appContext.getSystemService(UsbManager::class.java)
+                ?: throw IllegalArgumentException("device has no USB manager")
+            val device = usbManager.deviceList.values.firstOrNull {
+                it.vendorId == UsbSerialOpComLink.VENDOR_ID && it.productId == UsbSerialOpComLink.PRODUCT_ID
+            } ?: throw IllegalArgumentException("no OP-COM USB dongle attached")
+            OpComTransport(UsbSerialOpComLink(usbManager, device), applicationScope)
         }
     }
 

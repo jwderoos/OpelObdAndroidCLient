@@ -63,6 +63,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.documentfile)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.usbserial.driver)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(testFixtures(project(":core:transport")))

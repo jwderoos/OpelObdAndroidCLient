@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Matches the OP-COM clone dongle: a genuine FTDI chip under AUTO-M3's own
+     custom VID:PID, confirmed by USB descriptor probing (see
+     UsbSerialOpComLink and docs/hardware.md). Values must be decimal, not
+     hex: 0x0403 = 1027, 0x4F50 = 20304. -->
+<resources>
+    <usb-device
+        vendor-id="1027"
+        product-id="20304" />
+</resources>

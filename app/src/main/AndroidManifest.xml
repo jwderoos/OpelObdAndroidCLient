@@ -14,6 +14,15 @@
         android:name="android.hardware.bluetooth"
         android:required="false" />
 
+    <!-- OP-COM clone USB dongle (#26): USB device access permission is
+         requested per-device at connect time (see AdapterSection), not a
+         manifest permission. This feature + filter only makes Android
+         auto-prompt and launch straight to MainActivity when the dongle is
+         plugged in while the app isn't already running. -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <!-- Foreground service connection holder (#20): keeps a live session
          alive across backgrounding. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -41,6 +50,12 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
         </activity>
 
         <provider

@@ -25,6 +25,11 @@ class TransportSelectionTest {
     }
 
     @Test
+    fun `the opcom usb selection round-trips through its persisted form`() {
+        assertEquals(TransportSelection.OpComUsb, TransportSelection.decode(TransportSelection.OpComUsb.encode()))
+    }
+
+    @Test
     fun `garbage or absent persisted values fall back to demo`() {
         assertEquals(TransportSelection.Demo, TransportSelection.decode(null))
         assertEquals(TransportSelection.Demo, TransportSelection.decode(""))

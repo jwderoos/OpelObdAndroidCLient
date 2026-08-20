@@ -19,6 +19,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // usb-serial-for-android (OP-COM clone USB link) is only published on JitPack.
+        maven(url = "https://jitpack.io")
     }
 }
 
