@@ -57,5 +57,6 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             onImportFile = { filePicker.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
             progress = progress,
         )
+        DebugSection(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
     }
 }

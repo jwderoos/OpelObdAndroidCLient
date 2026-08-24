@@ -59,6 +59,27 @@ class AppContainer(context: Context) {
     /** The persisted adapter choice, applied to [switchableTransport] at build time. */
     val transportSelection: StateFlow<TransportSelection> by lazy { _transportSelection }
 
+    private val debugPrefs by lazy {
+        appContext.getSharedPreferences("debug", Context.MODE_PRIVATE)
+    }
+
+    private val _verboseOpComLogging by lazy {
+        MutableStateFlow(debugPrefs.getBoolean(PREF_VERBOSE_OPCOM_LOGGING, false))
+    }
+
+    /**
+     * Off by default. Traces the OP-COM USB link's raw bytes and decoded
+     * records to logcat — see [UsbSerialOpComLink] and [OpComTransport].
+     * Read at [buildTransport] time, so toggling it takes effect on the next
+     * connect, not retroactively on an already-open connection.
+     */
+    val verboseOpComLogging: StateFlow<Boolean> by lazy { _verboseOpComLogging }
+
+    fun setVerboseOpComLogging(enabled: Boolean) {
+        _verboseOpComLogging.value = enabled
+        debugPrefs.edit().putBoolean(PREF_VERBOSE_OPCOM_LOGGING, enabled).apply()
+    }
+
     private val switchableTransport by lazy {
         // A persisted ELM selection must never brick startup (Bluetooth
         // removed, MAC corrupted): fall back to the demo transport.
@@ -126,7 +147,12 @@ class AppContainer(context: Context) {
             val device = usbManager.deviceList.values.firstOrNull {
                 it.vendorId == UsbSerialOpComLink.VENDOR_ID && it.productId == UsbSerialOpComLink.PRODUCT_ID
             } ?: throw IllegalArgumentException("no OP-COM USB dongle attached")
-            OpComTransport(UsbSerialOpComLink(usbManager, device), applicationScope)
+            val verbose = _verboseOpComLogging.value
+            OpComTransport(
+                UsbSerialOpComLink(usbManager, device, verboseLogging = verbose),
+                applicationScope,
+                log = if (verbose) { msg -> Log.i("OpComTransport", msg) } else ({ }),
+            )
         }
     }
 
@@ -136,6 +162,7 @@ class AppContainer(context: Context) {
 
     private companion object {
         const val PREF_SELECTION = "selection"
+        const val PREF_VERBOSE_OPCOM_LOGGING = "verbose_opcom_logging"
         const val LOG_TAG = "AppContainer"
     }
 }

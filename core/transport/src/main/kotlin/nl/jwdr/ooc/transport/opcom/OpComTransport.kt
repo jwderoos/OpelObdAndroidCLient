@@ -38,6 +38,13 @@ class OpComTransport(
     private val link: OpComLink,
     private val scope: CoroutineScope,
     private val responseTimeout: Duration = 2.seconds,
+    /**
+     * Sink for verbose per-record diagnostic logging (raw bytes, decoded
+     * records, unmatched responses). No-op unless the caller wires up the
+     * app's debug-logging setting — this module has no Android dependency,
+     * so it can't read that setting itself; see `AppContainer.buildTransport`.
+     */
+    private val log: (String) -> Unit = {},
 ) : ObdTransport {
 
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -134,9 +141,15 @@ class OpComTransport(
             while (true) {
                 val chunk = link.read()
                 val (records, rest) = OpComFrameCodec.readRecords(readBuffer + chunk)
+                log(
+                    "read ${chunk.size}B [${chunk.toHex()}] -> " +
+                        "${records.size} record(s), ${rest.size}B unconsumed [${rest.toHex()}]",
+                )
                 readBuffer = rest
                 for (payload in records) {
-                    dispatch(OpComFrameCodec.decodeRecord(payload))
+                    val record = OpComFrameCodec.decodeRecord(payload)
+                    log("record ${record.describe()} raw=[${payload.toHex()}]")
+                    dispatch(record)
                 }
             }
         } catch (e: CancellationException) {
@@ -155,6 +168,11 @@ class OpComTransport(
                 if (pending != null && pending.code == record.code) {
                     pendingResponse = null
                     pending.deferred.complete(record)
+                } else {
+                    log(
+                        "unmatched response code=0x${record.code.toString(16)} " +
+                            "pending=${pending?.code?.let { "0x${it.toString(16)}" } ?: "none"}",
+                    )
                 }
             }
         }
@@ -182,3 +200,12 @@ open class OpComException(message: String) : Exception(message)
 
 /** No response to a command within the configured timeout. */
 class OpComTimeoutException(message: String) : OpComException(message)
+
+/** Formatting helpers for the [OpComTransport] `log` sink. */
+private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it) }
+
+private fun OpComRecord.describe(): String = when (this) {
+    is OpComRecord.Response -> "Response(code=0x${code.toString(16)}, payload=[${payload.toHex()}])"
+    is OpComRecord.RxFrame -> "RxFrame(id=0x${frame.id.toString(16)}, data=[${frame.data.toHex()}])"
+    OpComRecord.KeepAlive -> "KeepAlive"
+}
