@@ -10,6 +10,7 @@ import nl.jwdr.ooc.transport.CanLog
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
+import nl.jwdr.ooc.transport.RecordingTransport
 import nl.jwdr.ooc.transport.ReplayMode
 import nl.jwdr.ooc.transport.ReplayTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
@@ -46,6 +47,14 @@ class DiagnosticsManagerTest {
         manager.disconnect()
 
         assertEquals(ConnectionState.Disconnected, manager.connectionState.value)
+    }
+
+    @Test
+    fun `a recording wrapper around a simulated transport is still simulated`() = runTest {
+        val recorded = RecordingTransport(FakeEcuTransport(backgroundScope), { null }, backgroundScope)
+
+        assertTrue(DiagnosticsManager(recorded).isSimulated.value)
+        assertTrue(DiagnosticsManager(SwitchableObdTransport(recorded)).isSimulated.value)
     }
 
     @Test

@@ -46,6 +46,19 @@ class DtcReadTest {
     }
 
     @Test
+    fun `annotates the session capture with the action and ECU`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(readRequest(0x7E0)).respondWith(frame(0x7E8, 0x02, 0x58, 0x00))
+        transport.connect()
+        val notes = mutableListOf<String>()
+        val manager = DiagnosticsManager(transport, annotate = { notes += it })
+
+        manager.readDtcs(engine)
+
+        assertEquals(listOf("readDtcs ecu=Engine req=0x7E0 resp=0x7E8"), notes)
+    }
+
+    @Test
     fun `an ECU without stored faults yields an empty list`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
         transport.onFrame(readRequest(0x7E0))

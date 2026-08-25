@@ -48,6 +48,7 @@ import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
+import nl.jwdr.ooc.transport.RecordingTransport
 import nl.jwdr.ooc.transport.ReplayTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
 
@@ -61,6 +62,13 @@ import nl.jwdr.ooc.transport.SwitchableObdTransport
  */
 class DiagnosticsManager(
     private val transport: ObdTransport,
+    /**
+     * Receives a one-line description of every diagnostic action as it
+     * starts (`readDtcs ecu=Engine req=0x7E0 resp=0x7E8`). The app routes it
+     * into the session capture (issue #29) as `# event` comments so a recorded
+     * `.canlog` can be correlated with what the user did. No-op by default.
+     */
+    private val annotate: (String) -> Unit = {},
 ) {
     /** Top-level connection state for the UI chrome. */
     val connectionState: StateFlow<ConnectionState> = transport.state
@@ -90,10 +98,15 @@ class DiagnosticsManager(
     private fun ObdTransport.isSimulatedTransport(): Boolean = when (this) {
         is FakeEcuTransport, is ReplayTransport -> true
         is SwitchableObdTransport -> active.value.isSimulatedTransport()
+        is RecordingTransport -> delegate.isSimulatedTransport()
         else -> false
     }
 
     suspend fun connect() = transport.connect()
+
+    private fun annotate(action: String, target: EcuScanTarget) {
+        annotate("$action ecu=${target.name} req=0x%X resp=0x%X".format(target.requestId, target.responseId))
+    }
 
     suspend fun disconnect() = transport.disconnect()
 
@@ -109,8 +122,9 @@ class DiagnosticsManager(
         }
     }
 
-    private suspend fun probe(target: EcuScanTarget): EcuScanStatus =
-        withSession(target, SCAN_SESSION_CONFIG) { session ->
+    private suspend fun probe(target: EcuScanTarget): EcuScanStatus {
+        annotate("scanProbe", target)
+        return withSession(target, SCAN_SESSION_CONFIG) { session ->
             try {
                 val response = session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL))
                 EcuScanStatus.Present(dtcCount = response.dtcs.size)
@@ -121,16 +135,19 @@ class DiagnosticsManager(
                 EcuScanStatus.Absent
             }
         }
+    }
 
     /**
      * Reads the stored DTCs of one known-present ECU. Unlike a scan probe
      * this uses the conversational timeout/retry policy; failures (negative
      * response, timeout) propagate as [SessionException]s.
      */
-    suspend fun readDtcs(target: EcuScanTarget): List<Dtc> =
-        withSession(target, SessionConfig()) { session ->
+    suspend fun readDtcs(target: EcuScanTarget): List<Dtc> {
+        annotate("readDtcs", target)
+        return withSession(target, SessionConfig()) { session ->
             session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
         }
+    }
 
     /**
      * Clears all stored DTC groups of one ECU, then reads back and returns
@@ -138,11 +155,13 @@ class DiagnosticsManager(
      * state rather than an assumption. Destructive: callers must obtain
      * explicit user confirmation first (design spec safety rule).
      */
-    suspend fun clearDtcs(target: EcuScanTarget): List<Dtc> =
-        withSession(target, SessionConfig()) { session ->
+    suspend fun clearDtcs(target: EcuScanTarget): List<Dtc> {
+        annotate("clearDtcs", target)
+        return withSession(target, SessionConfig()) { session ->
             session.execute(ClearDiagnosticInformation(DTC_GROUP_ALL))
             session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
         }
+    }
 
     /**
      * Polls one measuring block and emits a decoded reading per [interval]:
@@ -160,6 +179,7 @@ class DiagnosticsManager(
         rows: List<DataRow>,
         interval: Duration,
     ): Flow<BlockReading> = flow {
+        annotate("pollMeasuringBlock block=${block.number} ecu=${target.name}")
         val secondaryId = requireNotNull(target.secondaryId) {
             "${target.name}: GMLAN live data needs the ECU's secondary CAN id"
         }
@@ -219,6 +239,7 @@ class DiagnosticsManager(
         test: OutputTest,
         bindings: List<TagBinding> = emptyList(),
     ): OutputTestRun {
+        annotate("startOutputTest test=${test.title} ecu=${target.name}")
         val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
         val session = DiagnosticSession(
             transport,
@@ -284,6 +305,7 @@ class DiagnosticsManager(
      * everything after discovery uses physical addressing.
      */
     suspend fun discoverObd2Ecus(): List<EcuScanTarget> {
+        annotate("discoverObd2Ecus")
         val responders = sortedSetOf<Int>()
         coroutineScope {
             val collector = launch {
@@ -305,8 +327,9 @@ class DiagnosticsManager(
      * Queries the supported-PID bitmasks (0x00, then each chained range) and
      * returns the supported PIDs this app knows how to scale, ascending.
      */
-    suspend fun obd2SupportedPids(target: EcuScanTarget): List<Obd2Pid> =
-        withSession(target, SessionConfig()) { session ->
+    suspend fun obd2SupportedPids(target: EcuScanTarget): List<Obd2Pid> {
+        annotate("obd2SupportedPids", target)
+        return withSession(target, SessionConfig()) { session ->
             val supported = mutableSetOf<Int>()
             var base = 0x00
             while (true) {
@@ -317,6 +340,7 @@ class DiagnosticsManager(
             }
             Obd2Pids.all.filter { it.id in supported }
         }
+    }
 
     /**
      * Polls the given PIDs at a fixed [interval], emitting one scaled reading
@@ -327,6 +351,7 @@ class DiagnosticsManager(
         pids: List<Obd2Pid>,
         interval: Duration,
     ): Flow<List<Obd2Value>> = flow {
+        annotate("pollObd2Pids", target)
         withSession(target, SessionConfig()) { session ->
             while (true) {
                 emit(
@@ -341,21 +366,25 @@ class DiagnosticsManager(
     }
 
     /** Reads the stored emission DTCs (mode 03) as raw two-byte codes. */
-    suspend fun obd2ReadDtcs(target: EcuScanTarget): List<Int> =
-        withSession(target, SessionConfig()) { session ->
+    suspend fun obd2ReadDtcs(target: EcuScanTarget): List<Int> {
+        annotate("obd2ReadDtcs", target)
+        return withSession(target, SessionConfig()) { session ->
             session.execute(ReadStoredDtcs).codes
         }
+    }
 
     /**
      * Clears emission-related data (mode 04), then reads back what the ECU
      * still stores. Destructive: callers must obtain explicit user
      * confirmation first (design spec safety rule).
      */
-    suspend fun obd2ClearDtcs(target: EcuScanTarget): List<Int> =
-        withSession(target, SessionConfig()) { session ->
+    suspend fun obd2ClearDtcs(target: EcuScanTarget): List<Int> {
+        annotate("obd2ClearDtcs", target)
+        return withSession(target, SessionConfig()) { session ->
             session.execute(ClearEmissionData)
             session.execute(ReadStoredDtcs).codes
         }
+    }
 
     private suspend fun <T> withSession(
         target: EcuScanTarget,

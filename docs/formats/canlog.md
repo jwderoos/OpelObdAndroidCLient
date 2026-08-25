@@ -30,6 +30,11 @@ this spec and synthetic samples are committed. See
    `note`.
 3. **Comments and blank lines.** Any other `#` line and any blank line is
    ignored, anywhere in the file.
+
+   One comment shape has a convention (still ignored by the parser): the
+   app's on-device session capture writes `# event <t_ms>: <text>` lines
+   marking what the user did (`# event 4210: readDtcs ecu=Engine req=0x7E0
+   resp=0x7E8`) so frames can be correlated with actions after the fact.
 4. **Frame lines.** Everything else must be a frame line:
 
    ```
@@ -58,6 +63,21 @@ number — never silently skipped.
   moves the transport to the `Error` state); a send after the script has
   ended is an error. This keeps the protocol stack honest against recorded
   sessions and is what the conformance suite (issue #7) builds on.
+
+## On-device capture
+
+With the debug toggle **Record sessions to file** on, the app writes every
+connect→disconnect to `files/captures/<yyyyMMdd-HHmmss>/` (issue #29):
+
+- `session.canlog` — this format, recorded by `RecordingTransport` around the
+  active adapter transport, metadata `transport` / `app` / `device`.
+- `usb.trace` — raw OP-COM link events, `<t_ms> <text>` per line (FTDI init
+  timeline, every bulk write/read as hex). Empty for non-USB adapters.
+
+Both are flushed per line, so a crash or unplugged dongle keeps everything
+up to that point. **Share last capture** in the debug section zips the newest
+directory. Real-vehicle captures are vendor/vehicle data: keep them under the
+git-ignored `/logs/`, never commit them.
 
 ## Provenance note
 

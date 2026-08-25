@@ -39,17 +39,20 @@ data class CanLog(
     fun format(): String = buildString {
         appendLine(HEADER)
         for ((key, value) in metadata) appendLine("# $key: $value")
-        for ((timestampMs, direction, frame) in frames) {
+        for (frame in frames) appendLine(formatFrameLine(frame))
+    }
+
+    companion object {
+        const val HEADER = "# ooc-canlog v1"
+
+        /** One `<t_ms> <tx|rx> <id_hex> <bytes...>` line without trailing newline. */
+        fun formatFrameLine(logged: LoggedFrame): String = buildString {
+            val (timestampMs, direction, frame) = logged
             append(timestampMs)
             append(' ').append(direction.name.lowercase())
             append(' ').append(frame.id.toString(16))
             for (byte in frame.data) append(' ').append("%02X".format(byte))
-            appendLine()
         }
-    }
-
-    companion object {
-        private const val HEADER = "# ooc-canlog v1"
         private val METADATA = Regex("""#\s*([^:\s]+):\s*(.*\S)\s*""")
 
         fun parse(text: String): CanLog {

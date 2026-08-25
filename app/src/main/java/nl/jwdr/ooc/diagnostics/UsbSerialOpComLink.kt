@@ -39,7 +39,20 @@ class UsbSerialOpComLink(
      * the app.
      */
     private val verboseLogging: () -> Boolean = { false },
+    /**
+     * Receives the same trace lines as [verboseLogging] but unconditionally,
+     * for the on-device session capture (`SessionCaptureStore.trace`, issue
+     * #29) — that sink decides itself whether a capture is open. Both exist
+     * because logcat is unavailable in the car (the phone's USB port is taken
+     * by the dongle) while the file capture needs no cable.
+     */
+    private val trace: (String) -> Unit = {},
 ) : OpComLink {
+
+    private fun log(message: String) {
+        if (verboseLogging()) Log.i(TAG, message)
+        trace(message)
+    }
 
     private var port: UsbSerialPort? = null
 
@@ -51,7 +64,7 @@ class UsbSerialOpComLink(
                 ?: throw IOException("failed to open ${device.deviceName} — USB permission not granted?")
             val serialPort = driver.ports.first() as FtdiSerialDriver.FtdiSerialPort
             serialPort.open(connection)
-            if (verboseLogging()) Log.i(TAG, "open: requesting baud=$BAUD_RATE 8N1, latency=${LATENCY_TIMER_MS}ms")
+            log("open: requesting baud=$BAUD_RATE 8N1, latency=${LATENCY_TIMER_MS}ms")
             serialPort.setParameters(BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             serialPort.setLatencyTimer(LATENCY_TIMER_MS)
             // usb-serial-for-android leaves DTR/RTS disabled by default (FtdiSerialDriver's
@@ -62,6 +75,7 @@ class UsbSerialOpComLink(
             // trip over.
             serialPort.rts = true
             serialPort.dtr = true
+            log("open: RTS/DTR asserted, purging tx x$TX_PURGE_COUNT + rx")
             repeat(TX_PURGE_COUNT) { serialPort.purgeHwBuffers(true, false) }
             serialPort.purgeHwBuffers(false, true)
             // The vendor software waits over a full second (1.03s measured via USB packet
@@ -70,13 +84,14 @@ class UsbSerialOpComLink(
             // without this delay only ever saw its pre-boot idle chatter, regardless of what was
             // configured beforehand.
             delay(BOOT_SETTLE_DELAY_MS)
-            if (verboseLogging()) Log.i(TAG, "open: settle delay elapsed, port ready for first command")
+            log("open: settle delay elapsed, port ready for first command")
             port = serialPort
         }
     }
 
     override suspend fun close() {
         withContext(Dispatchers.IO) {
+            log("close")
             runCatching { port?.close() }
             port = null
         }
@@ -85,7 +100,7 @@ class UsbSerialOpComLink(
     override suspend fun write(data: ByteArray) {
         withContext(Dispatchers.IO) {
             val p = port ?: throw IOException("link is not open")
-            if (verboseLogging()) Log.i(TAG, "write [${data.joinToString(" ") { "%02x".format(it) }}] as ${data.size} single-byte transfers")
+            log("write [${data.joinToString(" ") { "%02x".format(it) }}] as ${data.size} single-byte transfers")
             // One USB bulk transfer per byte. The clone's firmware only consumes the
             // first byte of each OUT packet: a whole record in one transfer is answered
             // with a 7F NAK after ~54 ms, never with the real response. The vendor
@@ -106,7 +121,7 @@ class UsbSerialOpComLink(
         while (n == 0) {
             n = p.read(buffer, READ_TIMEOUT_MS)
         }
-        if (verboseLogging()) Log.i(TAG, "read [${buffer.copyOf(n).joinToString(" ") { "%02x".format(it) }}]")
+        log("read [${buffer.copyOf(n).joinToString(" ") { "%02x".format(it) }}]")
         buffer.copyOf(n)
     }
 

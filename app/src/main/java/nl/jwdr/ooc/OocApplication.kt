@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.io.File
@@ -21,6 +22,7 @@ import nl.jwdr.ooc.catalogstore.CatalogDatabase
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.diagnostics.SessionCaptureStore
 import nl.jwdr.ooc.diagnostics.TransportSelection
 import nl.jwdr.ooc.diagnostics.UsbSerialOpComLink
 import nl.jwdr.ooc.service.ConnectionHolderService
@@ -28,6 +30,7 @@ import nl.jwdr.ooc.service.shouldRunConnectionHolder
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
+import nl.jwdr.ooc.transport.RecordingTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
 import nl.jwdr.ooc.transport.elm327.Elm327Transport
 import nl.jwdr.ooc.transport.opcom.OpComTransport
@@ -81,6 +84,57 @@ class AppContainer(context: Context) {
         debugPrefs.edit().putBoolean(PREF_VERBOSE_OPCOM_LOGGING, enabled).apply()
     }
 
+    private val _recordSessions by lazy {
+        MutableStateFlow(debugPrefs.getBoolean(PREF_RECORD_SESSIONS, false))
+    }
+
+    /**
+     * Off by default. While on, every connect→disconnect writes a
+     * `session.canlog` + `usb.trace` pair under `files/captures/` (issue #29)
+     * via [sessionCaptureStore]; read at connect time, so toggling mid-session
+     * applies to the next connection.
+     */
+    val recordSessions: StateFlow<Boolean> by lazy { _recordSessions }
+
+    fun setRecordSessions(enabled: Boolean) {
+        _recordSessions.value = enabled
+        debugPrefs.edit().putBoolean(PREF_RECORD_SESSIONS, enabled).apply()
+    }
+
+    val sessionCaptureStore: SessionCaptureStore by lazy {
+        SessionCaptureStore(File(appContext.filesDir, CAPTURES_DIR))
+    }
+
+    private fun appVersionName(): String =
+        runCatching { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName }
+            .getOrNull() ?: "unknown"
+
+    /** Annotates the running capture, if any, with what the app is doing. */
+    private fun noteSession(text: String) {
+        (switchableTransport.active.value as? RecordingTransport)?.note(text)
+    }
+
+    private fun recording(selection: TransportSelection, transport: ObdTransport): ObdTransport =
+        RecordingTransport(
+            transport,
+            openSink = {
+                if (_recordSessions.value) {
+                    sessionCaptureStore.openSession(
+                        mapOf(
+                            // Kind only: the ELM encoding carries the Bluetooth MAC, which
+                            // must not travel along in a shareable capture.
+                            "transport" to selection.encode().substringBefore('|'),
+                            "app" to appVersionName(),
+                            "device" to "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})",
+                        ),
+                    )
+                } else {
+                    null
+                }
+            },
+            scope = applicationScope,
+        )
+
     private val switchableTransport by lazy {
         // A persisted ELM selection must never brick startup (Bluetooth
         // removed, MAC corrupted): fall back to the demo transport.
@@ -92,7 +146,7 @@ class AppContainer(context: Context) {
     }
 
     val diagnosticsManager: DiagnosticsManager by lazy {
-        DiagnosticsManager(switchableTransport)
+        DiagnosticsManager(switchableTransport, annotate = ::noteSession)
     }
 
     init {
@@ -128,7 +182,10 @@ class AppContainer(context: Context) {
         transportPrefs.edit().putString(PREF_SELECTION, selection.encode()).apply()
     }
 
-    private fun buildTransport(selection: TransportSelection): ObdTransport = when (selection) {
+    private fun buildTransport(selection: TransportSelection): ObdTransport =
+        recording(selection, buildRawTransport(selection))
+
+    private fun buildRawTransport(selection: TransportSelection): ObdTransport = when (selection) {
         TransportSelection.Demo ->
             FakeEcuTransport(applicationScope).apply {
                 scriptDemoScanResponses()
@@ -153,7 +210,7 @@ class AppContainer(context: Context) {
             // pick up a toggle after an app restart.
             val verbose = { _verboseOpComLogging.value }
             OpComTransport(
-                UsbSerialOpComLink(usbManager, device, verboseLogging = verbose),
+                UsbSerialOpComLink(usbManager, device, verboseLogging = verbose, trace = sessionCaptureStore::trace),
                 applicationScope,
                 // A few AB retries as cheap robustness against a stale byte in the clone's
                 // input buffer; the real handshake bug was the write chunking, see
@@ -172,6 +229,8 @@ class AppContainer(context: Context) {
     private companion object {
         const val PREF_SELECTION = "selection"
         const val PREF_VERBOSE_OPCOM_LOGGING = "verbose_opcom_logging"
+        const val PREF_RECORD_SESSIONS = "record_sessions"
+        const val CAPTURES_DIR = "captures"
         private const val OPCOM_HANDSHAKE_ATTEMPTS = 3
         private val OPCOM_HANDSHAKE_ATTEMPT_TIMEOUT = 1.seconds
         const val LOG_TAG = "AppContainer"
