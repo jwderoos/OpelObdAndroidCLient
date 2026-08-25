@@ -42,6 +42,7 @@
     </plurals>
     <string name="ecu_status_present_unknown">Responding</string>
     <string name="ecu_status_absent">No response</string>
+    <string name="ecu_status_unreachable">Bus asleep</string>
 
     <string name="fault_codes_no_vehicle">Select a vehicle on the ECU list screen first.</string>
     <string name="action_open_ecu_list">Open ECU list</string>

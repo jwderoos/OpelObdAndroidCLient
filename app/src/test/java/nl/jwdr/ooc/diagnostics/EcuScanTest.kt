@@ -4,7 +4,13 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.protocol.session.SessionException
+import nl.jwdr.ooc.catalog.CanBus
+import nl.jwdr.ooc.transport.ConnectionState
+import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.FakeEcuTransport
+import nl.jwdr.ooc.transport.opcom.BusSelectable
+import nl.jwdr.ooc.transport.opcom.OpComBus
+import nl.jwdr.ooc.transport.opcom.OpComBusNotAwakeException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,5 +104,65 @@ class EcuScanTest {
         val e = runCatching { manager.scanEcus(listOf(engine)).toList() }.exceptionOrNull()
 
         assertTrue("expected TransportLost, got $e", e is SessionException.TransportLost)
+    }
+    /**
+     * A [FakeEcuTransport] that also answers [BusSelectable], failing
+     * [configureBus] for any request id in [asleepRequestIds] so a scan's
+     * bus-not-awake handling can be exercised (issue #33).
+     */
+    private class BusSelectableFake(
+        private val inner: FakeEcuTransport,
+        private val asleepRequestIds: Set<Int>,
+    ) : ObdTransport by inner, BusSelectable {
+        override suspend fun configureBus(bus: OpComBus, requestId: Int, secondaryId: Int, responseId: Int) {
+            if (requestId in asleepRequestIds) {
+                throw OpComBusNotAwakeException("bus not awake for 0x${requestId.toString(16)}")
+            }
+        }
+    }
+
+    @Test
+    fun `a bus-not-awake ECU is reported unreachable and the scan continues`() = runTest {
+        val inner = FakeEcuTransport(backgroundScope)
+        inner.onFrame(probeRequest(0x7E0))
+            .respondWith(frame(0x7E8, 0x05, 0x58, 0x01, 0x01, 0x70, 0xE1))
+        val transport = BusSelectableFake(inner, asleepRequestIds = setOf(0x251))
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        val asleep = EcuScanTarget("REC", requestId = 0x251, responseId = 0x651, secondaryId = 0x551, bus = CanBus.SWCAN)
+        val engineHs = engine.copy(bus = CanBus.HSCAN)
+
+        val results = manager.scanEcus(listOf(asleep, engineHs)).toList()
+
+        assertEquals(
+            listOf(
+                EcuScanResult(asleep, EcuScanStatus.Unreachable),
+                EcuScanResult(engineHs, EcuScanStatus.Present(dtcCount = 1)),
+            ),
+            results,
+        )
+    }
+    @Test
+    fun `a scan keeps the bus awake with periodic all-nodes tester-present`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        // Ten absent ECUs: each probe times out after the scan timeout, so the
+        // scan spans several seconds of virtual time — long enough for the
+        // keep-alive to fire between probes (issue #35).
+        val targets = List(10) { i ->
+            EcuScanTarget("e$i", requestId = 0x700 + i, responseId = 0x708 + i, bus = CanBus.SWCAN)
+        }
+
+        manager.scanEcus(targets).toList()
+
+        val testerPresent = CanFrame(
+            0x101,
+            bytes(0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00),
+        )
+        assertTrue(
+            "expected at least one keep-alive tester-present during the scan",
+            transport.sentFrames.any { it == testerPresent },
+        )
     }
 }

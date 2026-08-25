@@ -10,13 +10,14 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import nl.jwdr.ooc.catalog.EcuAddress
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.CatalogSummary
 import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanStatus
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
+import nl.jwdr.ooc.diagnostics.diagnosableCanAddress
+import nl.jwdr.ooc.diagnostics.toScanTarget
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.ui.UserMessage
 import nl.jwdr.ooc.ui.userMessageFor
@@ -37,6 +38,9 @@ sealed interface EcuRowStatus {
 
     /** The probe timed out: nothing at this address. */
     data object Absent : EcuRowStatus
+
+    /** The ECU's bus couldn't be reached (asleep / no car): never actually queried. */
+    data object Unreachable : EcuRowStatus
 }
 
 /** One ECU of the selected vehicle. */
@@ -134,19 +138,12 @@ class EcuListViewModel(
     }
 
     private suspend fun ecusState(vehicle: VehicleRef, group: String): EcuListUiState.Ecus {
+        // Only real, diagnosable CAN ECUs: catalog placeholder rows (zero
+        // address, VIRTUAL/CHCAN bus) are dropped so they never appear as a
+        // row or get scanned (issue #32).
         val definitions = repository.canEcusFor(vehicle, group)
-        targets = definitions.mapNotNull { definition ->
-            (definition.address as? EcuAddress.Can)?.let {
-                EcuScanTarget(
-                    definition.name,
-                    it.requestId,
-                    it.responseId,
-                    // 0 in catalog records that carry no broadcast id.
-                    secondaryId = it.secondaryId.takeIf { id -> id != 0 },
-                    bus = it.bus,
-                )
-            }
-        }
+            .filter { it.diagnosableCanAddress() != null }
+        targets = definitions.mapNotNull { it.toScanTarget() }
         return EcuListUiState.Ecus(
             vehicle = vehicle,
             group = group,
@@ -241,4 +238,5 @@ class EcuListViewModel(
 private fun EcuScanStatus.toRowStatus(): EcuRowStatus = when (this) {
     is EcuScanStatus.Present -> EcuRowStatus.Present(dtcCount)
     EcuScanStatus.Absent -> EcuRowStatus.Absent
+    EcuScanStatus.Unreachable -> EcuRowStatus.Unreachable
 }

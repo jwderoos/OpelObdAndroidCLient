@@ -185,6 +185,24 @@ class EcuListViewModelTest {
     }
 
     @Test
+    fun `virtual and request-id-0 catalog entries are excluded from the ECU rows`() = runTest(dispatcher) {
+        storeCatalog(
+            canEcu("Engine", 0x7E0),
+            canEcu("Anti Theft", 0x000).copy(canBus = "VIRTUAL"),
+            canEcu("Central Door Lock", 0x000).copy(canBus = "VIRTUAL"),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
+
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertEquals(
+            listOf(EcuRow("Engine", "Engine system", EcuRowStatus.NotScanned)),
+            state.rows,
+        )
+    }
+
+    @Test
     fun `selecting an ECU group shows only that group's CAN ECUs, not yet scanned`() = runTest(dispatcher) {
         storeCatalog(
             canEcu("Engine", 0x7E0).copy(groupName = "Engine"),

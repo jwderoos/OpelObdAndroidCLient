@@ -229,7 +229,7 @@ class OpComTransportTest {
     }
 
     @Test
-    fun `configureBus re-runs the full block when the target ECU changes`() = runTest {
+    fun `configureBus re-opens the interface (AB AA AC) then the full block when the target ECU changes`() = runTest {
         val link = FakeOpComLink()
         val transport = OpComTransport(link, backgroundScope)
         transport.connect()
@@ -238,7 +238,18 @@ class OpComTransportTest {
 
         transport.configureBus(OpComBus.HSCAN, requestId = 0x241, secondaryId = 0, responseId = 0x641)
 
-        assertEquals(2 * (afterFirst - 3), link.writtenCommands.size - 3)
+        // A switch re-runs the vendor's per-module open (AB/AA/AC) before the
+        // 74... block, matching the real capture and un-wedging a stale bus (#34).
+        val secondConfigure = link.writtenCommands.drop(afterFirst)
+        assertEquals(
+            listOf(0xAB, 0xAA, 0xAC) +
+                listOf(0x74, 0x73, 0x73, 0x73, 0x8E, 0x84) +
+                listOf(0x20, 0x20, 0x8E, 0x81) +
+                listOf(0x82) +
+                List(8) { 0x83 } +
+                listOf(0x82),
+            secondConfigure,
+        )
     }
 
     @Test

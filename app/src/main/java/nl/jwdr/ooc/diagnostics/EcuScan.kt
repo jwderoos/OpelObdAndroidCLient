@@ -34,6 +34,14 @@ sealed interface EcuScanStatus {
 
     /** The probe timed out: nothing at this address. */
     data object Absent : EcuScanStatus
+
+    /**
+     * The probe could not be run: the ECU's bus wasn't awake (no car/ignition)
+     * or the interface refused to configure it. Distinct from [Absent] — the
+     * address was never actually queried, so "not fitted" can't be concluded
+     * (issue #33).
+     */
+    data object Unreachable : EcuScanStatus
 }
 
 /** One per-ECU result emitted by [DiagnosticsManager.scanEcus]. */

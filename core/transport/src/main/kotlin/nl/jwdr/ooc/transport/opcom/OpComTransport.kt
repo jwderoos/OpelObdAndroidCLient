@@ -96,9 +96,7 @@ class OpComTransport(
                 _incomingFrames.resetReplayCache()
                 link.open()
                 readerJob = scope.launch { readLoop() }
-                probeHandshake()
-                executeCommand(CMD_GET_FIRMWARE_VERSION)
-                executeCommand(CMD_INIT, byteArrayOf(0x01))
+                openInterface()
                 _state.value = ConnectionState.Ready
             } catch (e: Exception) {
                 _state.value = ConnectionState.Error(e)
@@ -154,6 +152,10 @@ class OpComTransport(
         if (configuredBus == target) return
         commandMutex.withLock {
             try {
+                // A switch from a previously-configured ECU re-opens the
+                // interface first (issue #34); the first configuration after
+                // connect() rides on connect()'s open.
+                if (configuredBus != null) openInterface()
                 executeCommand(CMD_INIT_CONTINUE)
                 executeCommand(CMD_CONFIGURE, byteArrayOf(0x01, 0x00, 0xF6.toByte()))
                 executeCommand(CMD_CONFIGURE, byteArrayOf(0x02, 0x30, 0xEC.toByte()))
@@ -236,6 +238,20 @@ class OpComTransport(
     /** Caller must hold [commandMutex]. */
     private suspend fun executeCommand(code: Int, args: ByteArray = ByteArray(0), timeout: Duration = responseTimeout) {
         awaitResponse(code, timeout) { link.write(OpComFrameCodec.encodeCommand(code, args)) }
+    }
+
+    /**
+     * The interface open the vendor runs before talking to any ECU: `AB`
+     * (serial) / `AA` (firmware) / `AC 01` (init). Re-run per bus switch as
+     * well as at connect, because the genuine software re-opens for every
+     * module (issue #34) and this resets a stale/asleep CAN state that would
+     * otherwise leave `82 02` unanswered until a manual reconnect. Caller must
+     * hold [commandMutex].
+     */
+    private suspend fun openInterface() {
+        probeHandshake()
+        executeCommand(CMD_GET_FIRMWARE_VERSION)
+        executeCommand(CMD_INIT, byteArrayOf(0x01))
     }
 
     /**

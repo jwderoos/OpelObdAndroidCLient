@@ -116,6 +116,23 @@ class FaultCodesViewModelTest {
     }
 
     @Test
+    fun `virtual and request-id-0 catalog entries are not offered in the ECU picker`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0),
+                canEcu("Anti Theft", 0x000).copy(canBus = "VIRTUAL"),
+            ),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcu(listOf(EcuChoice("Engine", "Engine system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
     fun `with a vehicle and no target ECU the screen offers the ECU picker`() = runTest(dispatcher) {
         storeCatalog(listOf(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0)))
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))

@@ -304,6 +304,8 @@ private fun StatusLabel(status: EcuRowStatus) {
         }
         EcuRowStatus.Absent ->
             stringResource(R.string.ecu_status_absent) to MaterialTheme.colorScheme.outline
+        EcuRowStatus.Unreachable ->
+            stringResource(R.string.ecu_status_unreachable) to MaterialTheme.colorScheme.tertiary
     }
     Text(text = text, color = color, style = MaterialTheme.typography.labelLarge)
 }

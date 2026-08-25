@@ -55,6 +55,7 @@ import nl.jwdr.ooc.transport.RecordingTransport
 import nl.jwdr.ooc.transport.ReplayTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
 import nl.jwdr.ooc.transport.opcom.BusSelectable
+import nl.jwdr.ooc.transport.opcom.OpComBusNotAwakeException
 
 /**
  * Facade composing the protocol stack and the imported catalog behind one
@@ -139,14 +140,55 @@ class DiagnosticsManager(
      * connection drops mid-scan.
      */
     fun scanEcus(targets: List<EcuScanTarget>): Flow<EcuScanResult> = flow {
-        for (target in targets) {
-            emit(EcuScanResult(target, probe(target)))
+        // Keep the (single-wire) CAN bus from sleeping between probes: SW-CAN
+        // powers down after ~30 s idle, after which the interface's bus-awake
+        // poll fails until a reconnect (issue #35). A low-rate all-nodes
+        // tester-present, exactly as the vendor keeps alive, prevents that.
+        coroutineScope {
+            val keepAlive = launch { keepBusAwakeLoop() }
+            try {
+                for (target in targets) {
+                    emit(EcuScanResult(target, probe(target)))
+                }
+            } finally {
+                keepAlive.cancel()
+            }
+        }
+    }
+
+    /**
+     * Sends [ALL_NODES_TESTER_PRESENT] every [BUS_KEEPALIVE_INTERVAL] while a
+     * scan runs, so the bus stays awake between ECUs. Best-effort: it only
+     * fires while the transport is ready and never lets a failed keep-alive
+     * abort the scan.
+     */
+    private suspend fun keepBusAwakeLoop() {
+        while (true) {
+            delay(BUS_KEEPALIVE_INTERVAL)
+            if (connectionState.value == ConnectionState.Ready) {
+                runCatching { transport.send(ALL_NODES_TESTER_PRESENT) }
+            }
         }
     }
 
     private suspend fun probe(target: EcuScanTarget): EcuScanStatus {
         annotate("scanProbe", target)
-        return withSession(target, SCAN_SESSION_CONFIG) { session ->
+        return try {
+            probeSession(target)
+        } catch (e: SessionException.TransportLost) {
+            // A dropped connection is fatal to the whole scan, by contract.
+            throw e
+        } catch (e: OpComBusNotAwakeException) {
+            // Bus asleep (no car/ignition): report this ECU and keep scanning (#33).
+            EcuScanStatus.Unreachable
+        } catch (e: Exception) {
+            // Any other per-ECU failure must not abort the scan either.
+            EcuScanStatus.Unreachable
+        }
+    }
+
+    private suspend fun probeSession(target: EcuScanTarget): EcuScanStatus =
+        withSession(target, SCAN_SESSION_CONFIG) { session ->
             try {
                 val dtcCount = if (target.isGmlan) {
                     session.execute(ReturnToNormalMode)
@@ -169,7 +211,6 @@ class DiagnosticsManager(
                 EcuScanStatus.Absent
             }
         }
-    }
 
     /**
      * Reads the stored DTCs of one known-present ECU. Unlike a scan probe
@@ -516,6 +557,9 @@ class DiagnosticsManager(
         )
 
         val ALL_NODES_TESTER_PRESENT_INTERVAL = 2.seconds
+
+        /** How often a running scan pings the bus to keep SW-CAN awake (issue #35). */
+        val BUS_KEEPALIVE_INTERVAL = 2.seconds
 
         /** readDataByPacketIdentifier rate 0: stop the periodic-data schedule. */
         val STOP_PERIODIC_DATA = byteArrayOf(

@@ -11,11 +11,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import nl.jwdr.ooc.catalog.DtcCode
-import nl.jwdr.ooc.catalog.EcuAddress
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
+import nl.jwdr.ooc.diagnostics.diagnosableCanAddress
+import nl.jwdr.ooc.diagnostics.toScanTarget
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.transport.ConnectionState
 import nl.jwdr.ooc.ui.UserMessage
@@ -90,7 +91,10 @@ class FaultCodesViewModel(
                     _state.value = FaultCodesUiState.NoVehicle
                     return@collectLatest
                 }
+                // Drop catalog placeholder rows (zero address, VIRTUAL/CHCAN bus):
+                // they must not be offered or read (issue #32).
                 definitions = repository.canEcusFor(selected)
+                    .filter { it.diagnosableCanAddress() != null }
                 val pending = pendingEcuName?.also { pendingEcuName = null }
                 val target = pending?.let { name -> definitions.find { it.name == name } }
                 if (target != null) {
@@ -173,18 +177,9 @@ class FaultCodesViewModel(
             return
         }
         val definition = definitions.find { it.name == current.ecuName } ?: return
-        val address = definition.address as? EcuAddress.Can ?: return
+        val target = definition.toScanTarget() ?: return
         clearWith(current) {
-            val remaining = diagnosticsManager.clearDtcs(
-                EcuScanTarget(
-                    definition.name,
-                    address.requestId,
-                    address.responseId,
-                    // 0 in catalog records that carry no broadcast id.
-                    secondaryId = address.secondaryId.takeIf { it != 0 },
-                    bus = address.bus,
-                ),
-            )
+            val remaining = diagnosticsManager.clearDtcs(target)
             faultEntries(definition, remaining)
         }
     }
@@ -266,7 +261,7 @@ class FaultCodesViewModel(
     }
 
     private fun read(definition: EcuDefinition) {
-        val address = definition.address as? EcuAddress.Can ?: return
+        val target = definition.toScanTarget() ?: return
         readJob?.cancel()
         readJob = viewModelScope.launch {
             _state.value = FaultCodesUiState.Faults(
@@ -279,14 +274,6 @@ class FaultCodesViewModel(
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
                     diagnosticsManager.connect()
                 }
-                val target = EcuScanTarget(
-                    definition.name,
-                    address.requestId,
-                    address.responseId,
-                    // 0 in catalog records that carry no broadcast id.
-                    secondaryId = address.secondaryId.takeIf { it != 0 },
-                    bus = address.bus,
-                )
                 val dtcs = diagnosticsManager.readDtcs(target)
                 _state.value = FaultCodesUiState.Faults(
                     ecuName = definition.name,
