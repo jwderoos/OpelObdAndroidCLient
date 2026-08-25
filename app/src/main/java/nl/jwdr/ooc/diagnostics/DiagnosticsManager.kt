@@ -31,6 +31,9 @@ import nl.jwdr.ooc.catalog.OutputTest
 import nl.jwdr.ooc.catalog.TagBinding
 import nl.jwdr.ooc.protocol.gmlan.GmlanServices
 import nl.jwdr.ooc.protocol.gmlan.PeriodicDataMonitor
+import nl.jwdr.ooc.protocol.gmlan.ReadDiagnosticInformation
+import nl.jwdr.ooc.protocol.gmlan.ReturnToNormalMode
+import nl.jwdr.ooc.protocol.gmlan.readDiagnosticInformation
 import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
 import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
@@ -145,8 +148,20 @@ class DiagnosticsManager(
         annotate("scanProbe", target)
         return withSession(target, SCAN_SESSION_CONFIG) { session ->
             try {
-                val response = session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL))
-                EcuScanStatus.Present(dtcCount = response.dtcs.size)
+                val dtcCount = if (target.isGmlan) {
+                    session.execute(ReturnToNormalMode)
+                    try {
+                        session.readGmlanDtcs(target.secondaryId!!, SCAN_SESSION_CONFIG.responseTimeout).size
+                    } catch (e: SessionException.ResponseTimeout) {
+                        // ReturnToNormalMode already proved the ECU is alive;
+                        // it just didn't report DTCs by A9 within the scan's
+                        // fast timeout (recorded captures show that happening).
+                        return@withSession EcuScanStatus.Present(dtcCount = null)
+                    }
+                } else {
+                    session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs.size
+                }
+                EcuScanStatus.Present(dtcCount = dtcCount)
             } catch (e: SessionException.NegativeResponse) {
                 // It answered, so it exists; it just won't report DTCs this way.
                 EcuScanStatus.Present(dtcCount = null)
@@ -159,12 +174,20 @@ class DiagnosticsManager(
     /**
      * Reads the stored DTCs of one known-present ECU. Unlike a scan probe
      * this uses the conversational timeout/retry policy; failures (negative
-     * response, timeout) propagate as [SessionException]s.
+     * response, timeout) propagate as [SessionException]s. GMLAN-addressed
+     * ECUs (see [EcuScanTarget.isGmlan]) read via readDiagnosticInformation
+     * (0xA9); every other ECU keeps readDTCByStatus (0x18) (issue #31).
      */
     suspend fun readDtcs(target: EcuScanTarget): List<Dtc> {
         annotate("readDtcs", target)
-        return withSession(target, SessionConfig()) { session ->
-            session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+        val config = SessionConfig()
+        return withSession(target, config) { session ->
+            if (target.isGmlan) {
+                session.execute(ReturnToNormalMode)
+                session.readGmlanDtcs(target.secondaryId!!, config.pendingTimeout)
+            } else {
+                session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+            }
         }
     }
 
@@ -173,14 +196,37 @@ class DiagnosticsManager(
      * what it still stores (same session), so the UI shows the ECU's actual
      * state rather than an assumption. Destructive: callers must obtain
      * explicit user confirmation first (design spec safety rule).
+     * GMLAN-addressed ECUs (see [EcuScanTarget.isGmlan]) clear with OBD
+     * mode 04 ([ClearEmissionData]), never KWP2000's
+     * clearDiagnosticInformation (0x14) (issue #31).
      */
     suspend fun clearDtcs(target: EcuScanTarget): List<Dtc> {
         annotate("clearDtcs", target)
-        return withSession(target, SessionConfig()) { session ->
-            session.execute(ClearDiagnosticInformation(DTC_GROUP_ALL))
-            session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+        val config = SessionConfig()
+        return withSession(target, config) { session ->
+            if (target.isGmlan) {
+                session.execute(ReturnToNormalMode)
+                session.execute(ClearEmissionData)
+                session.readGmlanDtcs(target.secondaryId!!, config.pendingTimeout)
+            } else {
+                session.execute(ClearDiagnosticInformation(DTC_GROUP_ALL))
+                session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
+            }
         }
     }
+
+    /**
+     * Reads one GMLAN readDiagnosticInformation/reportDTCByStatusMask reply
+     * on [secondaryId] and maps it to the shared [Dtc] shape (the GMLAN
+     * reply's status byte has no KWP2000 counterpart and is dropped).
+     */
+    private suspend fun DiagnosticSession.readGmlanDtcs(secondaryId: Int, timeout: Duration): List<Dtc> =
+        readDiagnosticInformation(
+            transport,
+            secondaryId,
+            ReadDiagnosticInformation(DTC_STATUS_MASK_ALL),
+            timeout,
+        ).map { Dtc(code = it.code, symptom = it.failureType) }
 
     /**
      * Polls one measuring block and emits a decoded reading per [interval]:
@@ -439,6 +485,9 @@ class DiagnosticsManager(
         /** groupOfDTC covering all groups. */
         const val DTC_GROUP_ALL = 0xFF00
 
+        /** GMLAN reportDTCByStatusMask mask matching all DTCs, as sent by the vendor tool. */
+        const val DTC_STATUS_MASK_ALL = 0x12
+
         /**
          * Probe policy: silence means absent, so don't retry, and don't wait
          * the full conversational timeout per empty address.
@@ -525,6 +574,18 @@ class OutputTestRun internal constructor(
         }
     }
 }
+
+/**
+ * True when [EcuScanTarget] is addressed via the GMLAN 11-bit scheme
+ * (response id = request id + 0x400) with a secondary CAN id to receive
+ * UUDT replies on. The only ECUs the recorded vendor sessions ever send an
+ * A9 readDiagnosticInformation request to (issue #31) — a non-null
+ * secondaryId alone is not sufficient: ISO15765-addressed ECUs (engine,
+ * transmission) also carry one, but are not on this addressing scheme and
+ * have no recorded evidence of accepting A9.
+ */
+private val EcuScanTarget.isGmlan: Boolean
+    get() = secondaryId != null && responseId == requestId + 0x400
 
 private fun CommandRecord.toPayload() =
     ByteArray(significantBytes.size) { significantBytes[it].toByte() }

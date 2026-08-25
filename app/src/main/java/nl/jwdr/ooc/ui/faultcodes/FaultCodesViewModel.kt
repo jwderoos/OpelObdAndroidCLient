@@ -176,7 +176,14 @@ class FaultCodesViewModel(
         val address = definition.address as? EcuAddress.Can ?: return
         clearWith(current) {
             val remaining = diagnosticsManager.clearDtcs(
-                EcuScanTarget(definition.name, address.requestId, address.responseId, bus = address.bus),
+                EcuScanTarget(
+                    definition.name,
+                    address.requestId,
+                    address.responseId,
+                    // 0 in catalog records that carry no broadcast id.
+                    secondaryId = address.secondaryId.takeIf { it != 0 },
+                    bus = address.bus,
+                ),
             )
             faultEntries(definition, remaining)
         }
@@ -272,7 +279,14 @@ class FaultCodesViewModel(
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
                     diagnosticsManager.connect()
                 }
-                val target = EcuScanTarget(definition.name, address.requestId, address.responseId, bus = address.bus)
+                val target = EcuScanTarget(
+                    definition.name,
+                    address.requestId,
+                    address.responseId,
+                    // 0 in catalog records that carry no broadcast id.
+                    secondaryId = address.secondaryId.takeIf { it != 0 },
+                    bus = address.bus,
+                )
                 val dtcs = diagnosticsManager.readDtcs(target)
                 _state.value = FaultCodesUiState.Faults(
                     ecuName = definition.name,

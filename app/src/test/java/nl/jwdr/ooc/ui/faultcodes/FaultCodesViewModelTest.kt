@@ -56,7 +56,7 @@ class FaultCodesViewModelTest {
 
     private fun readRequest(requestId: Int) = frame(requestId, 0x04, 0x18, 0x02, 0xFF, 0x00)
 
-    private fun canEcu(name: String, requestId: Int, catalogKey: String? = null) = EcuEntity(
+    private fun canEcu(name: String, requestId: Int, catalogKey: String? = null, secondaryId: Int = 0) = EcuEntity(
         catalogId = CatalogEntity.SINGLETON_ID,
         modelYear = "2005",
         vehicle = "Astra-H",
@@ -70,7 +70,7 @@ class FaultCodesViewModelTest {
         canBus = "HSCAN",
         bitRateTenthsKbps = 5000,
         requestId = requestId,
-        secondaryId = 0,
+        secondaryId = secondaryId,
         responseId = requestId + 8,
         baudRate = null,
         klineAddress = null,
@@ -157,6 +157,63 @@ class FaultCodesViewModelTest {
             state.entries,
         )
     }
+
+    @Test
+    fun `a GMLAN-addressed ECU reads its DTCs via readDiagnosticInformation`() = runTest(dispatcher) {
+        // GMLAN response id is requestId + 0x400 (real addressing), not the
+        // canEcu() default of +8 (that formula fits this file's KWP2000 tests).
+        storeCatalog(ecus = listOf(canEcu("AHL", 0x249, secondaryId = 0x549).copy(responseId = 0x649)))
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(frame(0x249, 0x01, 0x20)).respondWith(frame(0x649, 0x01, 0x60))
+        transport.onFrame(frame(0x249, 0x03, 0xA9, 0x81, 0x12)).respondWith(
+            frame(0x549, 0x81, 0x93, 0x25, 0x03, 0x92),
+            frame(0x549, 0x81, 0x00, 0x00, 0x00, 0x92),
+        )
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectEcu("AHL")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        // 0x9325 via SAE J2012 (DtcCode.format): top 2 bits '10' -> 'B', next 2 bits '01' -> '1'.
+        assertEquals(listOf(FaultEntry("B1325", 3, text = null)), state.entries)
+    }
+
+    @Test
+    fun `confirming a clear on a GMLAN ECU shows the fresh post-clear state, not the cached pre-clear read`() =
+        runTest(dispatcher) {
+            storeCatalog(ecus = listOf(canEcu("AHL", 0x249, secondaryId = 0x549).copy(responseId = 0x649)))
+            val transport = FakeEcuTransport(backgroundScope)
+            transport.onFrame(frame(0x249, 0x01, 0x20)).respondWith(frame(0x649, 0x01, 0x60))
+            transport.onFrame(frame(0x249, 0x01, 0x04)).respondWith(frame(0x649, 0x01, 0x44))
+            var readCount = 0
+            transport.onFrame(frame(0x249, 0x03, 0xA9, 0x81, 0x12)).respondBy {
+                readCount++
+                if (readCount == 1) {
+                    listOf(
+                        frame(0x549, 0x81, 0x93, 0x25, 0x03, 0x92),
+                        frame(0x549, 0x81, 0x00, 0x00, 0x00, 0x92),
+                    )
+                } else {
+                    listOf(frame(0x549, 0x81, 0x00, 0x00, 0x00, 0x92))
+                }
+            }
+            val viewModel = viewModel(transport)
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.selectEcu("AHL")
+            dispatcher.scheduler.advanceUntilIdle()
+            viewModel.requestClear()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            viewModel.confirmClear()
+            dispatcher.scheduler.advanceUntilIdle()
+
+            // The post-clear read must not see the first read's UUDT frames,
+            // which are still in the transport's replay buffer.
+            val state = viewModel.state.value as FaultCodesUiState.Faults
+            assertEquals(emptyList<FaultEntry>(), state.entries)
+        }
 
     @Test
     fun `a DTC missing from the catalog keeps its code without text`() = runTest(dispatcher) {

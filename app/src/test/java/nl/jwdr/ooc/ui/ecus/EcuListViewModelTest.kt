@@ -59,7 +59,7 @@ class EcuListViewModelTest {
         return CanFrame(id, if (data.size < 8) data + ByteArray(8 - data.size) { pad } else data)
     }
 
-    private fun canEcu(name: String, requestId: Int) = EcuEntity(
+    private fun canEcu(name: String, requestId: Int, secondaryId: Int = 0) = EcuEntity(
         catalogId = CatalogEntity.SINGLETON_ID,
         modelYear = "2005",
         vehicle = "Astra-H",
@@ -73,7 +73,7 @@ class EcuListViewModelTest {
         canBus = "HSCAN",
         bitRateTenthsKbps = 5000,
         requestId = requestId,
-        secondaryId = 0,
+        secondaryId = secondaryId,
         responseId = requestId + 8,
         baudRate = null,
         klineAddress = null,
@@ -251,6 +251,31 @@ class EcuListViewModelTest {
                 EcuRow("ABS", "ABS system", EcuRowStatus.Present(dtcCount = 1)),
                 EcuRow("Engine", "Engine system", EcuRowStatus.Absent),
             ),
+            state.rows,
+        )
+    }
+
+    @Test
+    fun `a scan reports a GMLAN ECU's DTC count via readDiagnosticInformation`() = runTest(dispatcher) {
+        // GMLAN response id is requestId + 0x400 (real addressing), not the
+        // canEcu() default of +8 (that formula fits this file's KWP2000 tests).
+        storeCatalog(canEcu("AHL", 0x249, secondaryId = 0x549).copy(responseId = 0x649))
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(frame(0x249, 0x01, 0x20)).respondWith(frame(0x649, 0x01, 0x60))
+        transport.onFrame(frame(0x249, 0x03, 0xA9, 0x81, 0x12)).respondWith(
+            frame(0x549, 0x81, 0x93, 0x25, 0x03, 0x92),
+            frame(0x549, 0x81, 0x00, 0x00, 0x00, 0x92),
+        )
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        selectAstraH2005(viewModel)
+
+        viewModel.startScan()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as EcuListUiState.Ecus
+        assertEquals(
+            listOf(EcuRow("AHL", "AHL system", EcuRowStatus.Present(dtcCount = 1))),
             state.rows,
         )
     }

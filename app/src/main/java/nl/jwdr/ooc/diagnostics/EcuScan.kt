@@ -7,7 +7,10 @@ data class EcuScanTarget(
     val name: String,
     val requestId: Int,
     val responseId: Int,
-    /** UUDT broadcast id for GMLAN periodic data; null when unknown (OBD-II fallback). */
+    /**
+     * UUDT broadcast id for GMLAN periodic data and DTC reads (issue #31);
+     * null when unknown (OBD-II fallback).
+     */
     val secondaryId: Int? = null,
     /**
      * The physical CAN bus this ECU sits on, from the catalog; null when
