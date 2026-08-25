@@ -42,9 +42,8 @@ fun DebugSection(modifier: Modifier = Modifier) {
             Switch(checked = verboseOpComLogging, onCheckedChange = viewModel::setVerboseOpComLogging)
         }
         Text(
-            "Traces raw USB bytes and decoded protocol records to logcat. Takes effect on the " +
-                "next OP-COM connection, not the current one. Leave off unless you're chasing an " +
-                "adapter bug.",
+            "Traces raw USB bytes and decoded protocol records to logcat. Takes effect " +
+                "immediately. Leave off unless you're chasing an adapter bug.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -70,8 +70,8 @@ class AppContainer(context: Context) {
     /**
      * Off by default. Traces the OP-COM USB link's raw bytes and decoded
      * records to logcat — see [UsbSerialOpComLink] and [OpComTransport].
-     * Read at [buildTransport] time, so toggling it takes effect on the next
-     * connect, not retroactively on an already-open connection.
+     * Read live by the transport on every log call, so toggling it takes
+     * effect immediately, even on an already-open connection.
      */
     val verboseOpComLogging: StateFlow<Boolean> by lazy { _verboseOpComLogging }
 
@@ -147,11 +147,14 @@ class AppContainer(context: Context) {
             val device = usbManager.deviceList.values.firstOrNull {
                 it.vendorId == UsbSerialOpComLink.VENDOR_ID && it.productId == UsbSerialOpComLink.PRODUCT_ID
             } ?: throw IllegalArgumentException("no OP-COM USB dongle attached")
-            val verbose = _verboseOpComLogging.value
+            // Read the flag per call, not once here: the transport is built lazily at
+            // startup and lives for the whole process, so a captured Boolean would only
+            // pick up a toggle after an app restart.
+            val verbose = { _verboseOpComLogging.value }
             OpComTransport(
                 UsbSerialOpComLink(usbManager, device, verboseLogging = verbose),
                 applicationScope,
-                log = if (verbose) { msg -> Log.i("OpComTransport", msg) } else ({ }),
+                log = { msg -> if (verbose()) Log.i("OpComTransport", msg) },
             )
         }
     }

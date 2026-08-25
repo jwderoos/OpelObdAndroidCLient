@@ -34,8 +34,11 @@ class UsbSerialOpComLink(
      * Off by default; wired to the app's "verbose adapter logging" debug
      * setting in `AppContainer.buildTransport` so a future session can
      * capture fine-grained USB traffic on real hardware without recompiling.
+     * Read on every call (not captured at construction) so toggling the
+     * setting takes effect without rebuilding the transport or restarting
+     * the app.
      */
-    private val verboseLogging: Boolean = false,
+    private val verboseLogging: () -> Boolean = { false },
 ) : OpComLink {
 
     private var port: UsbSerialPort? = null
@@ -48,7 +51,7 @@ class UsbSerialOpComLink(
                 ?: throw IOException("failed to open ${device.deviceName} — USB permission not granted?")
             val serialPort = driver.ports.first() as FtdiSerialDriver.FtdiSerialPort
             serialPort.open(connection)
-            if (verboseLogging) Log.i(TAG, "open: requesting baud=$BAUD_RATE 8N1, latency=${LATENCY_TIMER_MS}ms")
+            if (verboseLogging()) Log.i(TAG, "open: requesting baud=$BAUD_RATE 8N1, latency=${LATENCY_TIMER_MS}ms")
             serialPort.setParameters(BAUD_RATE, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
             serialPort.setLatencyTimer(LATENCY_TIMER_MS)
             // usb-serial-for-android leaves DTR/RTS disabled by default (FtdiSerialDriver's
@@ -67,7 +70,7 @@ class UsbSerialOpComLink(
             // without this delay only ever saw its pre-boot idle chatter, regardless of what was
             // configured beforehand.
             delay(BOOT_SETTLE_DELAY_MS)
-            if (verboseLogging) Log.i(TAG, "open: settle delay elapsed, port ready for first command")
+            if (verboseLogging()) Log.i(TAG, "open: settle delay elapsed, port ready for first command")
             port = serialPort
         }
     }
@@ -82,7 +85,7 @@ class UsbSerialOpComLink(
     override suspend fun write(data: ByteArray) {
         withContext(Dispatchers.IO) {
             val p = port ?: throw IOException("link is not open")
-            if (verboseLogging) Log.i(TAG, "write [${data.joinToString(" ") { "%02x".format(it) }}]")
+            if (verboseLogging()) Log.i(TAG, "write [${data.joinToString(" ") { "%02x".format(it) }}]")
             p.write(data, WRITE_TIMEOUT_MS)
         }
     }
@@ -97,7 +100,7 @@ class UsbSerialOpComLink(
         while (n == 0) {
             n = p.read(buffer, READ_TIMEOUT_MS)
         }
-        if (verboseLogging) Log.i(TAG, "read [${buffer.copyOf(n).joinToString(" ") { "%02x".format(it) }}]")
+        if (verboseLogging()) Log.i(TAG, "read [${buffer.copyOf(n).joinToString(" ") { "%02x".format(it) }}]")
         buffer.copyOf(n)
     }
 

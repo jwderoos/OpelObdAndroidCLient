@@ -215,3 +215,92 @@ All tagged the same way as the existing TEMPORARY `Log.i` calls in that file.
 - Auto-memory: `opcom-handshake-no-response` memory file is now stale (it
   predates the baud-rate confirmation and blamed the wrong thing) — update or
   supersede it with a pointer to this file when picked back up.
+
+## Update 2026-08-25 — first clean on-device trace; plan step 1 answered
+
+Ran the debug build on the Samsung (SM-S908B) with "Verbose OP-COM USB
+logging" on, logcat over Wi-Fi adb (the OTG port is occupied by the dongle
+during the test — pair via *Pair device with pairing code* first; the phone
+picks a new mDNS port every time wireless debugging toggles, stale entries in
+Android Studio are just Bonjour cache). `adb install` needs `--user 0` on
+this phone (Secure Folder user 150 rejects shell installs with an empty error).
+
+### Bug found on the way: the verbose toggle didn't apply
+
+The first run logged nothing from our tags even with the toggle on. The
+transport is built once, lazily, at app-container init and lives for the
+whole process; the flag was captured as a `Boolean` at construction, so a
+toggle only took effect after an app restart (the process was 13 min old).
+Fixed: `UsbSerialOpComLink.verboseLogging` and the `OpComTransport.log`
+sink now read the flag on every call, so toggling applies immediately, even
+mid-connection. The Debug-screen text was corrected accordingly.
+
+### The trace (500000 baud, full vendor-matched init)
+
+```
+10:32:20.274 UsbSerialOpComLink  open: requesting baud=500000 8N1, latency=1ms
+10:32:20.274 FtdiSerialPort      baud rate=500000, effective=500000, value=0x0006, divisor=6
+10:32:21.402 UsbSerialOpComLink  open: settle delay elapsed
+10:32:21.407 UsbSerialOpComLink  write [01 00 ab ac]
+10:32:21.461 UsbSerialOpComLink  read  [03 00 7f 7f 00 01]
+10:32:21.463 OpComTransport      read 6B -> 1 record(s), 0B unconsumed
+10:32:21.463 OpComTransport      record KeepAlive raw=[7f 7f 00]
+10:32:23.415 UsbDeviceConnectionJNI close                  (2 s silence, timeout)
+```
+
+Answers to the plan above:
+
+1. **Nothing but one `7F 7F 00` record is ever decoded after `AB`.** It
+   arrives **54 ms after** `AB` and is never repeated — it behaves like a
+   *reply* to `AB`, not a periodic unsolicited keep-alive. Codec resync is
+   clean (0 unconsumed bytes), so no framing issue.
+2. **`setParameters()` is NOT a no-op**: `FtdiSerialDriver` logs and issues
+   `SET_BAUD_RATE wValue=0x0006` — byte-identical to the vendor capture. The
+   "baud never reaches the wire" theory is dead. Baud sweep no longer needed.
+
+### Vendor capture re-parsed (`DebugFiles/opcom.pcap`) — exact init diff
+
+Distinct control requests in the whole vendor session (bmReq/bReq/wValue):
+`5× RESET(0)` each followed by `GET_MODEM_STATUS`, `1× SET_BAUD 0x0006`,
+`1× SET_LATENCY 1`, `2× MODEM_CTRL RTS-on (0x0202)`, `2× MODEM_CTRL DTR-on
+(0x0101)`, `6× RESET(1)`, `1× RESET(2)`. **The vendor never sends
+`SET_DATA` (bReq 4), `SET_FLOW_CTRL` (bReq 2), or any DTR/RTS *de-assert*.**
+The vendor's `7F 7F` record appears **zero times** in the whole capture; `AB`
+is answered by `EB` immediately.
+
+Our sequence, from decompiling `usb-serial-for-android` 3.9.0
+`FtdiSerialPort` (`openInt`, `setParameters`, `purgeHwBuffers`):
+
+| step | vendor (OP-COM.exe via D2XX) | ours (library) |
+|---|---|---|
+| reset | `RESET(0)` + `GET_MODEM_STATUS`, **×5** | `RESET(0)` ×1 (in `openInt`) |
+| modem lines at open | — | **`MODEM_CTRL 0x0300` = DTR off + RTS off** (baked into `openInt`) |
+| baud | `SET_BAUD 6` | `SET_BAUD 6` ✓ |
+| line config | **none** | `SET_DATA 8N1` (from `setParameters`) |
+| latency | `SET_LATENCY 1` | `SET_LATENCY 1` ✓ |
+| lines | RTS on, DTR on | RTS on, DTR on ✓ |
+| purge | 6× `RESET(1)`, 1× `RESET(2)` | 6× `RESET(1)`, 1× `RESET(2)` ✓ (`purgeHwBuffers(write→1, read→2)`) |
+| after purge | **~125 ms, then RTS on + DTR on again**, then ~0.9 s | 1.1 s |
+| first write | `01`,`00`,`ab`,`ac` as **4 separate bulk-OUT transfers** | one 4-byte write |
+
+### Leading hypothesis now
+
+The clone MCU may treat a DTR/RTS *edge* (or the reset/modem-status dance)
+as a hardware reset, Arduino-style. Our `openInt` explicitly de-asserts both
+lines and we re-assert them 1 ms later — that edge would reboot the MCU right
+before our 1.1 s wait; a `7F` 54 ms after `AB` is then plausibly the
+bootloader/not-ready state answering. The vendor never produces that edge:
+its MCU had been running since USB enumeration (~58 s earlier in the capture).
+Alternative reading: `7F` = firmware negative response because a pre-`AB`
+mode-select command is missing (HANDOVER-C §4) — but the vendor capture shows
+`AB` as the very first bulk-OUT byte, so nothing precedes it on the wire.
+
+### Next experiment (single connect press, decisive)
+
+Keep sending `AB` every ~500 ms for ~10 s after the settle delay, logging every
+reply. If `EB` eventually appears → boot-time / reset-edge theory confirmed,
+fix = longer settle or avoid the de-assert edge (raw `controlTransfer` for
+the init instead of `openInt`'s defaults). If it stays `7F` forever →
+replicate the vendor sequence exactly with raw control transfers (5× reset +
+modem status, no `SET_DATA`, no de-assert, second RTS/DTR after purge,
+byte-per-byte write) and bisect from there.
