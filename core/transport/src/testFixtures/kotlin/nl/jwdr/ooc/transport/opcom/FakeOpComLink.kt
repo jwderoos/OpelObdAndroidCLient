@@ -8,7 +8,7 @@ import kotlinx.coroutines.channels.Channel
  * Each written record is matched by its command code (the first payload
  * byte) against a script; the scripted reply chunks are queued for [read].
  * An unscripted command gets a default empty-payload success response
- * (`code | 0x40`, no data) so the init handshake doesn't need a script line
+ * (`code + 0x40`, no data) so the init handshake doesn't need a script line
  * per command. Use [pushUnsolicited] to inject `91`/`7F` records
  * independent of any write.
  */

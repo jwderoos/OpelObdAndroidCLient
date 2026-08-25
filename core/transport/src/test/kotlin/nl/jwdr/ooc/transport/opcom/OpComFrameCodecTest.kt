@@ -157,11 +157,17 @@ class OpComFrameCodecTest {
     }
 
     @Test
-    fun `responseCodeFor ORs in the response bit as observed for every documented command`() {
+    fun `responseCodeFor adds 0x40 to the command, as the dongle actually replies`() {
         assertEquals(0xEB, OpComFrameCodec.responseCodeFor(0xAB))
         assertEquals(0xEA, OpComFrameCodec.responseCodeFor(0xAA))
         assertEquals(0xEC, OpComFrameCodec.responseCodeFor(0xAC))
         assertEquals(0xD0, OpComFrameCodec.responseCodeFor(0x90))
         assertEquals(0xC3, OpComFrameCodec.responseCodeFor(0x83))
+        // The convention is arithmetic +0x40, not a bitwise OR: commands that
+        // already have bit 0x40 set (0x73, 0x74 — the first configureBus steps)
+        // are answered with bit 0x80, i.e. B3/B4, and a bitwise OR would leave
+        // them unchanged and never match the reply. Real-car capture 2026-08-25.
+        assertEquals(0xB3, OpComFrameCodec.responseCodeFor(0x73))
+        assertEquals(0xB4, OpComFrameCodec.responseCodeFor(0x74))
     }
 }

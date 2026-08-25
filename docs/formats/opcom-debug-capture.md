@@ -23,7 +23,7 @@ The whole file is a single **zlib** stream (raw `deflate` with the standard
 The record stream is the USB serial conversation between the PC software
 and the interface, in order, with no timestamps. The first payload byte is
 a command/response code; a response to command `0xNN` uses code
-`0xNN | 0x40` (e.g. `0x90` → `0xD0`, `0x83` → `0xC3`). `0x91` (received CAN
+`0xNN + 0x40` (arithmetic add, e.g. `0x90` → `0xD0`, `0x83` → `0xC3`, `0x74` → `0xB4`; a bitwise OR is wrong for `0x73`/`0x74`, which already have bit `0x40` set). `0x91` (received CAN
 frame) and `0x7F` (keep-alive/status) arrive unsolicited.
 
 ## Observed commands

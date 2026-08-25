@@ -12,7 +12,7 @@ import nl.jwdr.ooc.transport.CanFrame
  *
  * `checksum` = sum of the two length bytes and the payload, mod 256. The
  * first payload byte is a command/response code; a response to command
- * `0xNN` uses code `0xNN | 0x40`. `91` (received CAN frame, big-endian id —
+ * `0xNN` uses code `0xNN + 0x40` (arithmetic; OR is wrong for 0x73/0x74). `91` (received CAN frame, big-endian id —
  * note the flip vs `90`'s little-endian id) and `7F` (keep-alive) arrive
  * unsolicited.
  */
@@ -98,7 +98,7 @@ object OpComFrameCodec {
     }
 
     /** The response code the interface uses for [command], e.g. `0x90` -> `0xD0`, `0xAB` -> `0xEB`. */
-    fun responseCodeFor(command: Int): Int = (command or 0x40) and 0xFF
+    fun responseCodeFor(command: Int): Int = (command + 0x40) and 0xFF
 
     private fun decodeCanFrame(payload: ByteArray): CanFrame {
         val id = beToInt32(payload.copyOfRange(1, 5))
