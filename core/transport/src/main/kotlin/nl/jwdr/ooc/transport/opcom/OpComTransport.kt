@@ -39,6 +39,16 @@ class OpComTransport(
     private val scope: CoroutineScope,
     private val responseTimeout: Duration = 2.seconds,
     /**
+     * Handshake probe: how many times to send the first `AB` command before
+     * giving up, and how long to wait for each attempt. Default (1 attempt,
+     * [responseTimeout]) is the plain handshake. The app sets a longer
+     * retry window while chasing the clone-interface bug where `AB` is
+     * answered by a lone `7F` record — see docs/opcom-handshake-handover.md.
+     * Every timed-out attempt is reported through [log].
+     */
+    private val handshakeAttempts: Int = 1,
+    private val handshakeAttemptTimeout: Duration = responseTimeout,
+    /**
      * Sink for verbose per-record diagnostic logging (raw bytes, decoded
      * records, unmatched responses). No-op unless the caller wires up the
      * app's debug-logging setting — this module has no Android dependency,
@@ -71,7 +81,7 @@ class OpComTransport(
                 _incomingFrames.resetReplayCache()
                 link.open()
                 readerJob = scope.launch { readLoop() }
-                executeCommand(CMD_GET_SERIAL)
+                probeHandshake()
                 executeCommand(CMD_GET_FIRMWARE_VERSION)
                 executeCommand(CMD_INIT, byteArrayOf(0x01))
                 _state.value = ConnectionState.Ready
@@ -113,16 +123,41 @@ class OpComTransport(
         awaitResponse(code) { link.write(OpComFrameCodec.encodeCommand(code, args)) }
     }
 
+    /**
+     * Sends `AB` up to [handshakeAttempts] times, [handshakeAttemptTimeout] each,
+     * until an `EB` arrives. Caller must hold [commandMutex].
+     */
+    private suspend fun probeHandshake() {
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                awaitResponse(CMD_GET_SERIAL, handshakeAttemptTimeout) {
+                    link.write(OpComFrameCodec.encodeCommand(CMD_GET_SERIAL))
+                }
+                if (attempt > 1) log("handshake: AB answered on attempt $attempt/$handshakeAttempts")
+                return
+            } catch (e: OpComTimeoutException) {
+                log("handshake: AB attempt $attempt/$handshakeAttempts timed out after $handshakeAttemptTimeout")
+                if (attempt >= handshakeAttempts) throw e
+            }
+        }
+    }
+
     /** Caller must hold [commandMutex]: only one command may be outstanding at a time. */
-    private suspend fun awaitResponse(commandCode: Int, write: suspend () -> Unit) {
+    private suspend fun awaitResponse(
+        commandCode: Int,
+        timeout: Duration = responseTimeout,
+        write: suspend () -> Unit,
+    ) {
         val deferred = CompletableDeferred<OpComRecord.Response>()
         pendingResponse = PendingResponse(OpComFrameCodec.responseCodeFor(commandCode), deferred)
         write()
         try {
-            withTimeout(responseTimeout) { deferred.await() }
+            withTimeout(timeout) { deferred.await() }
         } catch (e: TimeoutCancellationException) {
             throw OpComTimeoutException(
-                "timed out after $responseTimeout waiting for the response to command 0x${commandCode.toString(16)}",
+                "timed out after $timeout waiting for the response to command 0x${commandCode.toString(16)}",
             )
         } finally {
             pendingResponse = null

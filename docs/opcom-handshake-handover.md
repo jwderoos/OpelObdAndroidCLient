@@ -304,3 +304,89 @@ the init instead of `openInt`'s defaults). If it stays `7F` forever →
 replicate the vendor sequence exactly with raw control transfers (5× reset +
 modem status, no `SET_DATA`, no de-assert, second RTS/DTR after purge,
 byte-per-byte write) and bisect from there.
+
+### Retry-probe result (2026-08-25, later the same day)
+
+Implemented `OpComTransport(handshakeAttempts, handshakeAttemptTimeout)`
+(app wires 20 × 500 ms; defaults keep the single-attempt behaviour) and ran
+it on the phone. **All 20 `AB` attempts over 10 s were answered by
+`7F 7F 00`, each exactly 54 ms (±1 ms) after the write. `EB` never came.**
+
+- Boot-time / DTR-reset-edge theory: **refuted** (nothing changes over 11 s
+  after open). Remove it from the candidate list.
+- The reply is fully deterministic → `7F` is a *negative response to `AB`*
+  from a firmware that is running fine, not garbage and not a not-ready
+  state.
+- The **54 ms latency is itself a clue**: in the vendor capture `EB`
+  arrives within the same 15.6 ms USBPcap tick as `AB` (effectively
+  instant). At 500 kbaud nothing on the serial link takes 54 ms; a fixed
+  ~50 ms delay before a NAK smells like the firmware attempting something
+  (vehicle-side probe / voltage check / bus wake) with a ~50 ms timeout and
+  then refusing. This raises the question of **whether the interface was
+  plugged into a powered vehicle** during the Android tests vs. during the
+  Windows capture — if only the Windows run had 12 V on the OBD side, that
+  alone could explain `7F` (clone firmware refusing to identify without
+  vehicle power). Cheapest discriminator; ask/verify before more code.
+- Codec resilience verified incidentally: the 6-byte record often arrives
+  split across two reads (`[03 00] + [7f 7f 00 01]`, `[03 00 7f] + [7f 00
+  01]`, …) and is always reassembled with 0 bytes left over.
+
+Remaining code-side differences vs. the vendor (see table above), ranked by
+how likely a clone firmware notices them: (1) `openInt`'s explicit DTR/RTS
+**de-assert** at open — the vendor never de-asserts; (2) `SET_DATA` (bReq 4)
+which the vendor never sends; (3) 5× `RESET`+`GET_MODEM_STATUS` vs. our 1×;
+(4) second RTS/DTR assert after purge; (5) byte-per-byte writes. If the
+vehicle-power question comes back "same in both runs", the next experiment
+is to bypass the library's `open()`/`setParameters()` and issue the vendor's
+exact control-transfer sequence with raw `UsbDeviceConnection.controlTransfer`,
+then bisect.
+
+## RESOLVED 2026-08-25 — raw vendor-identical USB init gets `EB`
+
+Vehicle power ruled out first (interface was **not** connected to a car in
+either the Windows capture or any Android test), so the only remaining
+variables were host-side USB differences. `RawFtdiOpComLink` (new,
+`app/.../diagnostics/`) bypasses `usb-serial-for-android` and replays the
+vendor's control-transfer sequence verbatim with `UsbDeviceConnection`:
+5× `RESET`+`GET_MODEM_STATUS`, `SET_BAUD` 0x0006, `SET_LATENCY` 1, RTS then
+DTR, 6× `PURGE(1)` + 1× `PURGE(2)`, 125 ms, RTS+DTR again, 900 ms; **no
+`SET_DATA`, no DTR/RTS de-assert**; writes as one bulk transfer per byte.
+Selected via `OPCOM_USE_RAW_FTDI_LINK` in `OocApplication`.
+
+Result on the Samsung, two connects in a row:
+
+```
+write [01 00 ab ac]  → read [0e 00 eb 4f 49 31 32 33 34 35 36 2d 31 32 33 34 bd]   (~3 ms)
+                        Response(code=0xeb, payload="OI123456-1234")
+write [01 00 aa ab]  → Response(code=0xea, payload=[01 99])      firmware 1.99
+write [02 00 ac 01 af] → Response(code=0xec, payload=[01 00])
+ConnectionState.Ready
+```
+
+Byte-identical to the vendor capture. The `7F`-after-54-ms behaviour is gone.
+Every control transfer returned 0 (accepted); `GET_MODEM_STATUS` reads
+`01 60` each time.
+
+### What is NOT yet known: which difference was the culprit
+
+The raw link changes five things at once (see table above). Not bisected
+yet. Ranked guess: (1) the library's `MODEM_CTRL 0x0300` DTR/RTS **de-assert**
+in `FtdiSerialPort.openInt()`; (2) `SET_DATA` from `setParameters()`; (3)
+single vs. 5× reset; (4) second RTS/DTR after purge; (5) byte-per-byte
+writes. Bisect by re-adding one library behaviour at a time to
+`RawFtdiOpComLink` (each = one connect press). Knowing the culprit decides
+whether the raw link stays (library can't avoid `openInt`'s de-assert
+without a fork) or the library link can be repaired.
+
+### Follow-ups
+
+- Decide which link becomes the one implementation; delete the other and the
+  `OPCOM_USE_RAW_FTDI_LINK` switch.
+- `RawFtdiOpComLink.read()` busy-polls `bulkTransfer` at the 1 ms latency
+  timer while idle (each idle poll returns a 2-byte status packet). Fine for
+  diagnostics; consider raising the latency timer or using `UsbRequest`
+  before it becomes the permanent link.
+- The 20 × 500 ms `AB` retry probe in `OocApplication` is no longer needed
+  for diagnosis; drop back to a single attempt (or keep 2–3 as robustness)
+  once the culprit is known.
+- Update `opcom-handshake-no-response` auto-memory (done 2026-08-25).
