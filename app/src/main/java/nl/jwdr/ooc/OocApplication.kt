@@ -15,14 +15,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.launch
 import nl.jwdr.ooc.catalogstore.CatalogDatabase
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.TransportSelection
-import nl.jwdr.ooc.diagnostics.RawFtdiOpComLink
 import nl.jwdr.ooc.diagnostics.UsbSerialOpComLink
 import nl.jwdr.ooc.service.ConnectionHolderService
 import nl.jwdr.ooc.service.shouldRunConnectionHolder
@@ -153,17 +152,12 @@ class AppContainer(context: Context) {
             // startup and lives for the whole process, so a captured Boolean would only
             // pick up a toggle after an app restart.
             val verbose = { _verboseOpComLogging.value }
-            val link = if (OPCOM_USE_RAW_FTDI_LINK) {
-                RawFtdiOpComLink(usbManager, device, verboseLogging = verbose)
-            } else {
-                UsbSerialOpComLink(usbManager, device, verboseLogging = verbose)
-            }
             OpComTransport(
-                link,
+                UsbSerialOpComLink(usbManager, device, verboseLogging = verbose),
                 applicationScope,
-                // Handshake probe (docs/opcom-handshake-handover.md, 2026-08-25): keep
-                // re-sending AB for ~10 s to learn whether the clone ever answers EB
-                // once it has finished booting. Failing connects take 10 s instead of 2 s.
+                // A few AB retries as cheap robustness against a stale byte in the clone's
+                // input buffer; the real handshake bug was the write chunking, see
+                // UsbSerialOpComLink.write() and docs/opcom-handshake-handover.md.
                 handshakeAttempts = OPCOM_HANDSHAKE_ATTEMPTS,
                 handshakeAttemptTimeout = OPCOM_HANDSHAKE_ATTEMPT_TIMEOUT,
                 log = { msg -> if (verbose()) Log.i("OpComTransport", msg) },
@@ -178,11 +172,8 @@ class AppContainer(context: Context) {
     private companion object {
         const val PREF_SELECTION = "selection"
         const val PREF_VERBOSE_OPCOM_LOGGING = "verbose_opcom_logging"
-        // Experiment (docs/opcom-handshake-handover.md): replicate the vendor's exact
-        // USB init with raw transfers instead of usb-serial-for-android.
-        private const val OPCOM_USE_RAW_FTDI_LINK = true
-        private const val OPCOM_HANDSHAKE_ATTEMPTS = 20
-        private val OPCOM_HANDSHAKE_ATTEMPT_TIMEOUT = 500.milliseconds
+        private const val OPCOM_HANDSHAKE_ATTEMPTS = 3
+        private val OPCOM_HANDSHAKE_ATTEMPT_TIMEOUT = 1.seconds
         const val LOG_TAG = "AppContainer"
     }
 }

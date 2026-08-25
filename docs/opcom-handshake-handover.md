@@ -390,3 +390,33 @@ without a fork) or the library link can be repaired.
   for diagnosis; drop back to a single attempt (or keep 2–3 as robustness)
   once the culprit is known.
 - Update `opcom-handshake-no-response` auto-memory (done 2026-08-25).
+
+## ROOT CAUSE (bisected 2026-08-25): one byte per USB bulk-OUT packet
+
+Bisected by re-adding library behaviours one at a time to the raw link, then
+confirmed the other way round (library link with a single change):
+
+| step | change vs. working raw link | result |
+|---|---|---|
+| 1 | + library's `MODEM_CTRL 0x0300` DTR/RTS de-assert at open | `EB` — **not** the culprit |
+| 2 | + library's `SET_DATA 8N1` | `EB` (3 connects) — **not** the culprit |
+| 3 | records written as **one** bulk transfer instead of one per byte | **`7F` after 54 ms, 20/20** — culprit |
+| confirm | original `UsbSerialOpComLink` (library `open()`/`setParameters()` untouched), `write()` changed to one byte per transfer | **`EB`/`EA`/`EC`, Ready** |
+
+The clone's firmware only consumes the first byte of each USB OUT packet. A
+whole record in one packet is seen as a lone length byte `01`, the firmware
+waits ~50 ms for the rest and answers with the `7F 7F 00` NAK — that is the
+54 ms signature. The vendor software behaves accordingly: **all 1542
+bulk-OUT transfers in the reference capture are exactly 1 byte**, including
+every `90` send-CAN-frame command, so this is a hard constraint for all
+traffic, not just the handshake. Throughput cost: one full-speed USB
+transaction per byte (~1 ms), fine for diagnostics.
+
+Every control-transfer difference (reset count, de-assert, `SET_DATA`,
+second RTS/DTR) was a red herring; 5× reset and the second RTS/DTR were
+never individually tested but are proven irrelevant by the confirmation run.
+
+Final state: `UsbSerialOpComLink.write()` loops one `port.write()` per byte;
+`RawFtdiOpComLink` and the `OPCOM_USE_RAW_FTDI_LINK` switch were deleted;
+the `AB` retry is dialed back to 3 × 1 s as cheap robustness. The verbose
+USB logging toggle (Settings → Debug) stays, now applied live.

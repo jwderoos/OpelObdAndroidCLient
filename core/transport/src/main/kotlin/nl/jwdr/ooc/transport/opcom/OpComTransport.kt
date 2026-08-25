@@ -39,11 +39,9 @@ class OpComTransport(
     private val scope: CoroutineScope,
     private val responseTimeout: Duration = 2.seconds,
     /**
-     * Handshake probe: how many times to send the first `AB` command before
-     * giving up, and how long to wait for each attempt. Default (1 attempt,
-     * [responseTimeout]) is the plain handshake. The app sets a longer
-     * retry window while chasing the clone-interface bug where `AB` is
-     * answered by a lone `7F` record — see docs/opcom-handshake-handover.md.
+     * How many times to send the first `AB` command before giving up, and
+     * how long to wait for each attempt. Default (1 attempt, [responseTimeout])
+     * is the plain handshake; the app allows a few retries as cheap robustness.
      * Every timed-out attempt is reported through [log].
      */
     private val handshakeAttempts: Int = 1,

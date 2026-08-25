@@ -85,8 +85,14 @@ class UsbSerialOpComLink(
     override suspend fun write(data: ByteArray) {
         withContext(Dispatchers.IO) {
             val p = port ?: throw IOException("link is not open")
-            if (verboseLogging()) Log.i(TAG, "write [${data.joinToString(" ") { "%02x".format(it) }}]")
-            p.write(data, WRITE_TIMEOUT_MS)
+            if (verboseLogging()) Log.i(TAG, "write [${data.joinToString(" ") { "%02x".format(it) }}] as ${data.size} single-byte transfers")
+            // One USB bulk transfer per byte. The clone's firmware only consumes the
+            // first byte of each OUT packet: a whole record in one transfer is answered
+            // with a 7F NAK after ~54 ms, never with the real response. The vendor
+            // software does the same (every one of the 1542 bulk-OUT transfers in the
+            // reference capture is exactly 1 byte). Bisected 2026-08-25, see
+            // docs/opcom-handshake-handover.md.
+            for (b in data) p.write(byteArrayOf(b), WRITE_TIMEOUT_MS)
         }
     }
 
