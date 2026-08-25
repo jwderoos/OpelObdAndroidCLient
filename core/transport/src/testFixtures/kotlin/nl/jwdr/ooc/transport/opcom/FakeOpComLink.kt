@@ -26,6 +26,9 @@ class FakeOpComLink : OpComLink {
     /** Every command code written by the transport, in order. */
     val writtenCommands = mutableListOf<Int>()
 
+    /** Every full record payload (code byte + args) written by the transport, in order. */
+    val writtenPayloads = mutableListOf<ByteArray>()
+
     private val scripts = mutableMapOf<Int, List<ByteArray>>()
     private var incoming = Channel<ByteArray>(Channel.UNLIMITED)
 
@@ -66,8 +69,10 @@ class FakeOpComLink : OpComLink {
 
     override suspend fun write(data: ByteArray) {
         val (records, _) = OpComFrameCodec.readRecords(data)
-        val code = records.single()[0].toInt() and 0xFF
+        val payload = records.single()
+        val code = payload[0].toInt() and 0xFF
         writtenCommands += code
+        writtenPayloads += payload
         val chunks = scripts[code]
             ?: listOf(OpComFrameCodec.encodeRecord(byteArrayOf(OpComFrameCodec.responseCodeFor(code).toByte())))
         chunks.forEach { incoming.trySend(it) }

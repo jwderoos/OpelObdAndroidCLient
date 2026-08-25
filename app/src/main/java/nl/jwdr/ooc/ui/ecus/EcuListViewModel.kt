@@ -137,7 +137,7 @@ class EcuListViewModel(
         val definitions = repository.canEcusFor(vehicle, group)
         targets = definitions.mapNotNull { definition ->
             (definition.address as? EcuAddress.Can)?.let {
-                EcuScanTarget(definition.name, it.requestId, it.responseId)
+                EcuScanTarget(definition.name, it.requestId, it.responseId, bus = it.bus)
             }
         }
         return EcuListUiState.Ecus(

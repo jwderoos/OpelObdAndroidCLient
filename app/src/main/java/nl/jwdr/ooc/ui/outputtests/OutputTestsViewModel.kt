@@ -170,6 +170,7 @@ class OutputTestsViewModel(
                         address.responseId,
                         // 0 in catalog records that carry no broadcast id.
                         address.secondaryId.takeIf { it != 0 },
+                        bus = address.bus,
                     ),
                     test,
                     bindings,

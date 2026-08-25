@@ -178,6 +178,7 @@ class LiveDataViewModel(
                     address.requestId,
                     address.responseId,
                     secondaryId = address.secondaryId.takeIf { it != 0 },
+                    bus = address.bus,
                 )
                 diagnosticsManager.pollMeasuringBlock(target, block, rows, POLL_INTERVAL)
                     .collect { reading -> onReading(definition.name, reading) }

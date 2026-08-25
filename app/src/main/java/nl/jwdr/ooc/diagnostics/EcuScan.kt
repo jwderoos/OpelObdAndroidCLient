@@ -1,5 +1,7 @@
 package nl.jwdr.ooc.diagnostics
 
+import nl.jwdr.ooc.catalog.CanBus
+
 /** One ECU to probe during a bus scan: display identity plus its CAN channel. */
 data class EcuScanTarget(
     val name: String,
@@ -7,6 +9,14 @@ data class EcuScanTarget(
     val responseId: Int,
     /** UUDT broadcast id for GMLAN periodic data; null when unknown (OBD-II fallback). */
     val secondaryId: Int? = null,
+    /**
+     * The physical CAN bus this ECU sits on, from the catalog; null when
+     * unknown (OBD-II fallback, which has no catalog entry to read it from).
+     * Drives [DiagnosticsManager]'s OP-COM bus-select/RX-filter step
+     * (issue #30) — a null value simply skips it, same as today's no-op for
+     * every other transport.
+     */
+    val bus: CanBus? = null,
 )
 
 /** Outcome of probing one [EcuScanTarget]. */

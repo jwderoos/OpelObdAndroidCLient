@@ -24,6 +24,7 @@ object OpComFrameCodec {
     private const val CODE_RX_FRAME = 0x91
     private const val CODE_KEEP_ALIVE = 0x7F
     private const val CODE_SEND_FRAME = 0x90
+    private const val CODE_SET_RX_FILTER = 0x83
 
     /** Wraps [payload] in the length-prefixed, checksummed record framing. */
     fun encodeRecord(payload: ByteArray): ByteArray {
@@ -37,6 +38,10 @@ object OpComFrameCodec {
     /** Builds a command record: code byte followed by [args]. */
     fun encodeCommand(code: Int, args: ByteArray = ByteArray(0)): ByteArray =
         encodeRecord(byteArrayOf(code.toByte()) + args)
+
+    /** Builds an `83` (set RX filter) record: slot number, then the CAN id little-endian. `id = -1` (`FF FF FF FF`) turns the slot off. */
+    fun encodeSetRxFilter(slot: Int, id: Int): ByteArray =
+        encodeRecord(byteArrayOf(CODE_SET_RX_FILTER.toByte(), slot.toByte()) + intToLe32(id))
 
     /** Builds a `90` (transmit CAN frame) record: little-endian id, DLC, data padded to 8 bytes. */
     fun encodeSendFrame(frame: CanFrame): ByteArray {

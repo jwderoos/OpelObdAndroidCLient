@@ -51,6 +51,7 @@ import nl.jwdr.ooc.transport.ObdTransport
 import nl.jwdr.ooc.transport.RecordingTransport
 import nl.jwdr.ooc.transport.ReplayTransport
 import nl.jwdr.ooc.transport.SwitchableObdTransport
+import nl.jwdr.ooc.transport.opcom.BusSelectable
 
 /**
  * Facade composing the protocol stack and the imported catalog behind one
@@ -100,6 +101,24 @@ class DiagnosticsManager(
         is SwitchableObdTransport -> active.value.isSimulatedTransport()
         is RecordingTransport -> delegate.isSimulatedTransport()
         else -> false
+    }
+
+    private fun ObdTransport.asBusSelectable(): BusSelectable? = when (this) {
+        is BusSelectable -> this
+        is SwitchableObdTransport -> active.value.asBusSelectable()
+        is RecordingTransport -> delegate.asBusSelectable()
+        else -> null
+    }
+
+    /**
+     * Puts the OP-COM interface on [target]'s bus with RX filters for its
+     * ECU before a session opens (issue #30) — a no-op when [target] has no
+     * known bus (OBD-II fallback) or the transport isn't OP-COM.
+     */
+    private suspend fun ensureBusConfigured(target: EcuScanTarget) {
+        val bus = target.bus ?: return
+        val selectable = transport.asBusSelectable() ?: return
+        selectable.configureBus(bus.toOpComBus(), target.requestId, target.secondaryId ?: 0, target.responseId)
     }
 
     suspend fun connect() = transport.connect()
@@ -240,6 +259,7 @@ class DiagnosticsManager(
         bindings: List<TagBinding> = emptyList(),
     ): OutputTestRun {
         annotate("startOutputTest test=${test.title} ecu=${target.name}")
+        ensureBusConfigured(target)
         val sessionScope = CoroutineScope(currentCoroutineContext() + Job())
         val session = DiagnosticSession(
             transport,
@@ -391,6 +411,7 @@ class DiagnosticsManager(
         config: SessionConfig,
         block: suspend (DiagnosticSession) -> T,
     ): T {
+        ensureBusConfigured(target)
         // DiagnosticSession needs a real scope for its collector coroutines;
         // an inline coroutineScope would never return while they run.
         val sessionScope = CoroutineScope(currentCoroutineContext() + Job())

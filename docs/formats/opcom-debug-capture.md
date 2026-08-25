@@ -35,7 +35,8 @@ frame) and `0x7F` (keep-alive/status) arrive unsolicited.
 | `AC` | PC→IF | `01` | Unknown init; `EC 01 00` |
 | `74` | PC→IF | — | Unknown; response `B4 75 00` |
 | `73` | PC→IF | subcmd + args | Init/config, subcommands `01`–`04` observed |
-| `8E`,`84`,`81`,`82`,`20` | PC→IF | 1 byte | Bus/mode selection (`82 02` also used as a poll); `20` seen with `22`/`23` |
+| `8E`,`84`,`82`,`20` | PC→IF | 1 byte | Bus/mode selection (`82 02` also used as a poll); `20` seen with `22`/`23`/`24` |
+| `81` | PC→IF | 1 or 6 bytes | Bus parameters; 1 byte for HSCAN, 6 for SWCAN/MSCAN — see issue #30 |
 | `83` | PC→IF | slot(1) + CAN id (u32 LE) | Set RX filter slot 1–8; `FF FF FF FF` = slot off |
 | `71`,`72` | PC→IF | CAN id (u32 LE) + DLC + 8 data | Configure periodic message (tester present etc., sent by interface hardware — not visible as `90`/`91` records) |
 | `9F` | PC→IF | CAN id (u32 LE) + DLC + 8 data | Define cyclic TX message (seen carrying KWP `21 xx` local-id list on the engine ECU) |

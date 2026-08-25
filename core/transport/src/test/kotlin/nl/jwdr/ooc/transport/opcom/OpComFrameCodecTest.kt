@@ -135,6 +135,28 @@ class OpComFrameCodecTest {
     }
 
     @Test
+    fun `encodeSetRxFilter encodes the slot byte then the CAN id little-endian`() {
+        val record = OpComFrameCodec.encodeSetRxFilter(slot = 3, id = 0x549)
+
+        val (records, _) = OpComFrameCodec.readRecords(record)
+        val payload = records.single()
+
+        assertEquals(0x83, payload[0].toInt() and 0xFF)
+        assertEquals(3, payload[1].toInt() and 0xFF)
+        assertEquals(listOf(0x49, 0x05, 0x00, 0x00), payload.slice(2..5).map { it.toInt() and 0xFF })
+    }
+
+    @Test
+    fun `encodeSetRxFilter encodes an off slot as FF FF FF FF`() {
+        val record = OpComFrameCodec.encodeSetRxFilter(slot = 1, id = -1)
+
+        val (records, _) = OpComFrameCodec.readRecords(record)
+        val payload = records.single()
+
+        assertEquals(listOf(0xFF, 0xFF, 0xFF, 0xFF), payload.slice(2..5).map { it.toInt() and 0xFF })
+    }
+
+    @Test
     fun `responseCodeFor ORs in the response bit as observed for every documented command`() {
         assertEquals(0xEB, OpComFrameCodec.responseCodeFor(0xAB))
         assertEquals(0xEA, OpComFrameCodec.responseCodeFor(0xAA))

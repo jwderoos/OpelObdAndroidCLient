@@ -3,6 +3,7 @@ package nl.jwdr.ooc.transport.opcom
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.ConnectionState
 import java.io.IOException
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -146,6 +147,130 @@ class OpComTransportTest {
         yield() // let the reader coroutine hit the failure
 
         assertTrue(transport.state.value is ConnectionState.Error)
+    }
+
+    @Test
+    fun `configureBus requires ConnectionState Ready`() = runTest {
+        val transport = OpComTransport(FakeOpComLink(), backgroundScope)
+
+        val e = runCatching { transport.configureBus(OpComBus.HSCAN, 0x7E0, 0, 0x7E8) }.exceptionOrNull()
+
+        assertTrue("expected IllegalStateException, got $e", e is IllegalStateException)
+    }
+
+    @Test
+    fun `configureBus HSCAN runs the full vendor init block after the handshake`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+
+        assertEquals(
+            listOf(0xAB, 0xAA, 0xAC) +
+                listOf(0x74, 0x73, 0x73, 0x73, 0x8E, 0x84) + // constant post-handshake block
+                listOf(0x20, 0x20, 0x8E, 0x81) + // HSCAN bus-select block
+                listOf(0x82) + // 82 02 poll bus awake
+                List(8) { 0x83 } + // 8 RX filter slots
+                listOf(0x82), // 82 01 open bus
+            link.writtenCommands,
+        )
+    }
+
+    @Test
+    fun `configureBus programs RX filter slots 1,2 off, 3=secondaryId, 5=responseId, others 0`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0x549, responseId = 0x649)
+
+        val filterWrites = link.writtenPayloads.filter { (it[0].toInt() and 0xFF) == 0x83 }
+        fun idOf(payload: ByteArray) = (0..3).sumOf { (payload[2 + it].toInt() and 0xFF) shl (it * 8) }
+        assertEquals(8, filterWrites.size)
+        assertEquals(-1, idOf(filterWrites[0])) // slot 1 off
+        assertEquals(-1, idOf(filterWrites[1])) // slot 2 off
+        assertEquals(0x549, idOf(filterWrites[2])) // slot 3 = secondaryId
+        assertEquals(0, idOf(filterWrites[3]))
+        assertEquals(0x649, idOf(filterWrites[4])) // slot 5 = responseId
+        assertEquals(0, idOf(filterWrites[5]))
+        assertEquals(0, idOf(filterWrites[6]))
+        assertEquals(0, idOf(filterWrites[7]))
+    }
+
+    @Test
+    fun `configureBus SWCAN sends the SWCAN-specific bus-select bytes`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        transport.configureBus(OpComBus.SWCAN, requestId = 0x249, secondaryId = 0x549, responseId = 0x649)
+
+        val busSelect = link.writtenCommands.drop(3 + 6).take(3) // after handshake + constant block
+        assertEquals(listOf(0x20, 0x84, 0x81), busSelect)
+        val eightyOne = link.writtenPayloads.first { (it[0].toInt() and 0xFF) == 0x81 }
+        assertEquals(
+            listOf(0x08, 0x04, 0x3c, 0x03, 0x03, 0x03),
+            eightyOne.drop(1).map { it.toInt() and 0xFF },
+        )
+    }
+
+    @Test
+    fun `configureBus is a no-op when called again for the same bus and ECU`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+        val afterFirst = link.writtenCommands.size
+
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+
+        assertEquals(afterFirst, link.writtenCommands.size)
+    }
+
+    @Test
+    fun `configureBus re-runs the full block when the target ECU changes`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+        val afterFirst = link.writtenCommands.size
+
+        transport.configureBus(OpComBus.HSCAN, requestId = 0x241, secondaryId = 0, responseId = 0x641)
+
+        assertEquals(2 * (afterFirst - 3), link.writtenCommands.size - 3)
+    }
+
+    @Test
+    fun `configureBus gives up after unanswered 82 02 polls with a bus-not-awake error, sending no filters`() = runTest {
+        val link = FakeOpComLink()
+        link.onSilence(0x82)
+        val transport = OpComTransport(link, backgroundScope, busAwakeAttempts = 3, busAwakePollTimeout = 10.milliseconds)
+        transport.connect()
+
+        val e = runCatching {
+            transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+        }.exceptionOrNull()
+
+        assertTrue("expected OpComBusNotAwakeException, got $e", e is OpComBusNotAwakeException)
+        assertEquals(ConnectionState.Ready, transport.state.value)
+        assertTrue("must not proceed to write RX filters", link.writtenPayloads.none { (it[0].toInt() and 0xFF) == 0x83 })
+    }
+
+    @Test
+    fun `a command timeout during configureBus outside the bus-awake poll is fatal`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+        link.onSilence(0x73)
+
+        val e = runCatching {
+            transport.configureBus(OpComBus.HSCAN, requestId = 0x7E0, secondaryId = 0, responseId = 0x7E8)
+        }.exceptionOrNull()
+
+        assertTrue("expected OpComTimeoutException, got $e", e is OpComTimeoutException)
+        assertTrue(transport.state.value is ConnectionState.Error)
+        assertTrue(link.closed)
     }
 
     @Test
