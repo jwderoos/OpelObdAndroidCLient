@@ -62,6 +62,18 @@ class OpComTransportTest {
     }
 
     @Test
+    fun `send writes a 9F record for an ISO-TP Consecutive Frame and completes on its DF ack`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        // PCI 0x21 = Consecutive Frame, sequence 1.
+        transport.send(CanFrame(0x7E0, byteArrayOf(0x21, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77)))
+
+        assertEquals(listOf(0xAB, 0xAA, 0xAC, 0x9F), link.writtenCommands)
+    }
+
+    @Test
     fun `received 91 frames are emitted on incomingFrames`() = runTest {
         val link = FakeOpComLink()
         val transport = OpComTransport(link, backgroundScope)
@@ -213,6 +225,20 @@ class OpComTransportTest {
             listOf(0x08, 0x04, 0x3c, 0x03, 0x03, 0x03),
             eightyOne.drop(1).map { it.toInt() and 0xFF },
         )
+    }
+
+    @Test
+    fun `configureBus MSCAN sends the MSCAN-specific bus-select bytes`() = runTest {
+        val link = FakeOpComLink()
+        val transport = OpComTransport(link, backgroundScope)
+        transport.connect()
+
+        transport.configureBus(OpComBus.MSCAN, requestId = 0x249, secondaryId = 0x549, responseId = 0x649)
+
+        val busSelect = link.writtenCommands.drop(3 + 6).take(4) // after handshake + constant block
+        assertEquals(listOf(0x20, 0x20, 0x8E, 0x81), busSelect)
+        val eightyOne = link.writtenPayloads.first { (it[0].toInt() and 0xFF) == 0x81 }
+        assertEquals(listOf(0x06), eightyOne.drop(1).map { it.toInt() and 0xFF })
     }
 
     @Test

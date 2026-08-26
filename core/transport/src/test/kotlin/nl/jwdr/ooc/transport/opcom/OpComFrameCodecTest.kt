@@ -50,6 +50,38 @@ class OpComFrameCodecTest {
     }
 
     @Test
+    fun `sendFrameCommand returns 0x90 for a single-frame ISO-TP payload`() {
+        assertEquals(0x90, OpComFrameCodec.sendFrameCommand(CanFrame(0x7E0, byteArrayOf(0x02, 0x01, 0x0C))))
+    }
+
+    @Test
+    fun `sendFrameCommand returns 0x90 for a first-frame ISO-TP payload`() {
+        assertEquals(0x90, OpComFrameCodec.sendFrameCommand(CanFrame(0x7E0, byteArrayOf(0x10, 0x14, 0x3B, 0x01))))
+    }
+
+    @Test
+    fun `sendFrameCommand returns 0x9F for a consecutive-frame ISO-TP payload`() {
+        assertEquals(
+            0x9F,
+            OpComFrameCodec.sendFrameCommand(
+                CanFrame(0x7E0, byteArrayOf(0x21, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77)),
+            ),
+        )
+    }
+
+    @Test
+    fun `encodeSendFrame uses cmd 0x9F for an ISO-TP Consecutive Frame, acked as 0xDF`() {
+        val frame = CanFrame(0x7E0, byteArrayOf(0x21, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77))
+
+        val record = OpComFrameCodec.encodeSendFrame(frame)
+        val (records, _) = OpComFrameCodec.readRecords(record)
+        val payload = records.single()
+
+        assertEquals(0x9F, payload[0].toInt() and 0xFF)
+        assertEquals(0xDF, OpComFrameCodec.responseCodeFor(payload[0].toInt() and 0xFF))
+    }
+
+    @Test
     fun `readRecords extracts a single complete record and consumes it from the buffer`() {
         val record = OpComFrameCodec.encodeRecord(byteArrayOf(0x7F))
 

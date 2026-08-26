@@ -24,7 +24,9 @@ object OpComFrameCodec {
     private const val CODE_RX_FRAME = 0x91
     private const val CODE_KEEP_ALIVE = 0x7F
     private const val CODE_SEND_FRAME = 0x90
+    private const val CODE_SEND_CONSECUTIVE_FRAME = 0x9F
     private const val CODE_SET_RX_FILTER = 0x83
+    private const val ISOTP_PCI_CONSECUTIVE_FRAME = 0x2
 
     /** Wraps [payload] in the length-prefixed, checksummed record framing. */
     fun encodeRecord(payload: ByteArray): ByteArray {
@@ -43,12 +45,26 @@ object OpComFrameCodec {
     fun encodeSetRxFilter(slot: Int, id: Int): ByteArray =
         encodeRecord(byteArrayOf(CODE_SET_RX_FILTER.toByte(), slot.toByte()) + intToLe32(id))
 
-    /** Builds a `90` (transmit CAN frame) record: little-endian id, DLC, data padded to 8 bytes. */
+    /**
+     * The command code [encodeSendFrame] uses for [frame]: `9F` for an ISO-TP
+     * Consecutive Frame continuation (PCI nibble `2`), `90` for everything
+     * else (Single/First Frame, or non-ISO-TP payloads). The dongle acks each
+     * with its own `+0x40` code (`DF`/`D0`) — callers must await the code
+     * this returns, not assume `90`.
+     */
+    fun sendFrameCommand(frame: CanFrame): Int =
+        if (frame.data.isNotEmpty() && ((frame.data[0].toInt() and 0xFF) ushr 4) == ISOTP_PCI_CONSECUTIVE_FRAME) {
+            CODE_SEND_CONSECUTIVE_FRAME
+        } else {
+            CODE_SEND_FRAME
+        }
+
+    /** Builds a `90`/`9F` (transmit CAN frame) record: little-endian id, DLC, data padded to 8 bytes. */
     fun encodeSendFrame(frame: CanFrame): ByteArray {
         val idBytes = intToLe32(frame.id)
         val padded = ByteArray(8)
         frame.data.copyInto(padded)
-        val payload = byteArrayOf(CODE_SEND_FRAME.toByte()) + idBytes + byteArrayOf(frame.data.size.toByte()) + padded
+        val payload = byteArrayOf(sendFrameCommand(frame).toByte()) + idBytes + byteArrayOf(frame.data.size.toByte()) + padded
         return encodeRecord(payload)
     }
 

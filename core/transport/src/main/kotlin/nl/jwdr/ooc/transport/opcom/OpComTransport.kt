@@ -24,10 +24,13 @@ import nl.jwdr.ooc.transport.ObdTransport
  * [ObdTransport] over an OP-COM clone USB serial interface, framed per
  * `docs/formats/opcom-debug-capture.md`.
  *
- * The `AB`/`AA`/`AC` init handshake, then raw `90` (transmit) / `91`
+ * The `AB`/`AA`/`AC` init handshake, then raw `90`/`9F` (transmit) / `91`
  * (receive) CAN frame I/O; the protocol layer runs its own session logic on
  * top of raw frames, as it already does for [nl.jwdr.ooc.transport.elm327.Elm327Transport].
- * Periodic/cyclic TX (`71`/`72`/`9F`) is documented but not implemented yet.
+ * `9F` is not a distinct feature — [OpComFrameCodec.sendFrameCommand] selects
+ * it automatically in place of `90` for an ISO-TP Consecutive Frame
+ * continuation (issue #41). Periodic/cyclic TX (`71`/`72`) is documented but
+ * not implemented.
  *
  * Unlike the half-duplex ELM327 (one command, wait for its prompt), the
  * interface is full-duplex: `91`/`7F` records can arrive at any time, so a
@@ -123,7 +126,8 @@ class OpComTransport(
         }
         commandMutex.withLock {
             try {
-                awaitResponse(CMD_SEND_FRAME) { link.write(OpComFrameCodec.encodeSendFrame(frame)) }
+                val command = OpComFrameCodec.sendFrameCommand(frame)
+                awaitResponse(command) { link.write(OpComFrameCodec.encodeSendFrame(frame)) }
             } catch (e: OpComTimeoutException) {
                 _state.value = ConnectionState.Error(e)
                 teardown()
@@ -200,7 +204,8 @@ class OpComTransport(
         OpComBus.MSCAN -> listOf(
             CMD_SELECT_BUS to byteArrayOf(0x22),
             CMD_SELECT_BUS to byteArrayOf(0x24),
-            CMD_SET_BUS_PARAMS to byteArrayOf(0x08, 0x02, 0x35, 0x01, 0x01, 0x01),
+            CMD_SET_MODE to byteArrayOf(0x01),
+            CMD_SET_BUS_PARAMS to byteArrayOf(0x06),
         )
     }
 
@@ -357,7 +362,6 @@ class OpComTransport(
         const val CMD_GET_SERIAL = 0xAB
         const val CMD_GET_FIRMWARE_VERSION = 0xAA
         const val CMD_INIT = 0xAC
-        const val CMD_SEND_FRAME = 0x90
 
         // configureBus's vendor init block (docs/formats/opcom-debug-capture.md); names are
         // best guesses, not documented semantics — only the byte-for-byte sequence is confirmed.
