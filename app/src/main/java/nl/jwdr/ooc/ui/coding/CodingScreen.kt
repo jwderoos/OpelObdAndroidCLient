@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.jwdr.ooc.R
 import nl.jwdr.ooc.diagnostics.CodingEntryOutcome
+import nl.jwdr.ooc.ui.ecus.EcuGroupPicker
 import nl.jwdr.ooc.ui.faultcodes.EcuChoice
 
 /**
@@ -44,6 +45,11 @@ fun CodingScreen(
     when (val current = state) {
         CodingUiState.Loading -> Unit
         CodingUiState.NoVehicle -> NoVehicle(onOpenEcuList)
+        is CodingUiState.PickEcuGroup -> EcuGroupPicker(
+            vehicle = current.vehicle,
+            groups = current.groups,
+            onSelect = viewModel::selectGroup,
+        )
         is CodingUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
         is CodingUiState.PickTable -> TablePicker(current, viewModel::selectTable)
         is CodingUiState.Entries -> {

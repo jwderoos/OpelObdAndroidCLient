@@ -18,6 +18,7 @@ import nl.jwdr.ooc.catalogstore.CatalogPayload
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.EcuEntity
 import nl.jwdr.ooc.catalogstore.FakeCatalogDao
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
@@ -127,6 +128,73 @@ class CodingViewModelTest {
 
         assertEquals(
             CodingUiState.PickEcu(listOf(EcuChoice("UEC", "UEC system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `with more than one ECU group the screen offers the group picker`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("UEC", 0x250, "UECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(codingFile("UECKEY", "UECKEY.0x1201.txt")),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            CodingUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting a group narrows the picker to that group's codable ECUs`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("UEC", 0x250, "UECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(codingFile("UECKEY", "UECKEY.0x1201.txt")),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            CodingUiState.PickEcu(listOf(EcuChoice("UEC", "UEC system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `changing the ECU re-offers the group picker when more than one group exists`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("UEC", 0x250, "UECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(codingFile("UECKEY", "UECKEY.0x1201.txt")),
+        )
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(frame(0x250, 0x02, 0x1A, 0x44))
+            .respondWith(frame(0x258, 0x04, 0x5A, 0x44, 0x01, 0x02))
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("UEC")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.changeEcu()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            CodingUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
             viewModel.state.value,
         )
     }

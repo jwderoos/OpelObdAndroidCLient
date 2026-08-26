@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import nl.jwdr.ooc.catalog.DtcCode
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.EcuGroupResolution
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
 import nl.jwdr.ooc.diagnostics.diagnosableCanAddress
@@ -43,6 +45,9 @@ sealed interface FaultCodesUiState {
 
     /** No catalog or no vehicle selected; point the user to the ECU list. */
     data object NoVehicle : FaultCodesUiState
+
+    /** The selected vehicle has more than one ECU group; offer them. */
+    data class PickEcuGroup(val vehicle: VehicleRef, val groups: List<String>) : FaultCodesUiState
 
     /** The selected vehicle's diagnosable ECUs, to pick one to read. */
     data class PickEcu(val ecus: List<EcuChoice>) : FaultCodesUiState
@@ -78,32 +83,71 @@ class FaultCodesViewModel(
     private var pendingEcuName: String? = initialEcuName
     private var readJob: Job? = null
 
+    /** Chosen at the ECU-group step; never persisted, unlike the vehicle selection. */
+    private val selectedGroup = MutableStateFlow<Pair<VehicleRef, String>?>(null)
+
+    /** The vehicle currently being resolved; null when none is selected. */
+    private var currentVehicle: VehicleRef? = null
+
     init {
         viewModelScope.launch {
             combine(
                 repository.summary,
                 repository.selectedVehicle,
-                ::Pair,
-            ).collectLatest { (summary, selected) ->
+                selectedGroup,
+                ::Triple,
+            ).collectLatest { (summary, selected, groupSelection) ->
                 readJob?.cancel()
                 obd2Targets = null
                 if (summary == null || selected == null) {
+                    currentVehicle = null
                     _state.value = FaultCodesUiState.NoVehicle
                     return@collectLatest
                 }
-                // Drop catalog placeholder rows (zero address, VIRTUAL/CHCAN bus):
-                // they must not be offered or read (issue #32).
-                definitions = repository.canEcusFor(selected)
-                    .filter { it.diagnosableCanAddress() != null }
-                val pending = pendingEcuName?.also { pendingEcuName = null }
-                val target = pending?.let { name -> definitions.find { it.name == name } }
-                if (target != null) {
-                    read(target)
-                } else {
-                    _state.value = pickerState()
+                currentVehicle = selected
+                val pending = pendingEcuName
+                if (pending != null) {
+                    pendingEcuName = null
+                    // The deep-link target (ECU list drill-in, issue #32) may
+                    // belong to any group: search the flat catalog rather than
+                    // making it wait on a group pick it didn't ask for. Note
+                    // selectedGroup is deliberately left untouched here — it's
+                    // a combine() input, and mutating it from inside this very
+                    // collectLatest would self-trigger a re-entrant emission
+                    // that cancels the read() job just launched below.
+                    val flatDefinitions = repository.canEcusFor(selected)
+                        .filter { it.diagnosableCanAddress() != null }
+                    val target = flatDefinitions.find { it.name == pending }
+                    if (target != null) {
+                        definitions = flatDefinitions.filter { it.group == target.group }
+                        read(target)
+                        return@collectLatest
+                    }
                 }
+                val group = groupSelection?.takeIf { it.first == selected }?.second
+                resolveGroupAndShowPicker(selected, group)
             }
         }
+    }
+
+    /** Drop catalog placeholder rows (zero address, VIRTUAL/CHCAN bus): they must not be offered or read (issue #32). */
+    private suspend fun resolveGroupAndShowPicker(selected: VehicleRef, group: String?) {
+        when (val resolution = repository.resolveEcuGroup(selected, group)) {
+            is EcuGroupResolution.NeedsPick -> {
+                definitions = emptyList()
+                _state.value = FaultCodesUiState.PickEcuGroup(selected, resolution.groups)
+            }
+            is EcuGroupResolution.Resolved -> {
+                definitions = repository.canEcusFor(selected, resolution.group)
+                    .filter { it.diagnosableCanAddress() != null }
+                _state.value = pickerState()
+            }
+        }
+    }
+
+    fun selectGroup(group: String) {
+        val vehicle = (_state.value as? FaultCodesUiState.PickEcuGroup)?.vehicle ?: return
+        selectedGroup.value = vehicle to group
     }
 
     /**
@@ -217,9 +261,18 @@ class FaultCodesViewModel(
 
     fun changeEcu() {
         readJob?.cancel()
-        _state.value = obd2Targets?.let { targets ->
-            FaultCodesUiState.PickEcu(targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) })
-        } ?: pickerState()
+        obd2Targets?.let { targets ->
+            _state.value = FaultCodesUiState.PickEcu(targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) })
+            return
+        }
+        val vehicle = currentVehicle ?: return
+        // Re-derive the group too: it may re-offer the group picker when the
+        // vehicle has more than one, exactly like the ECU list does. Resolved
+        // directly (not just by resetting selectedGroup and waiting on the
+        // combine to re-fire) so this also works right after a deep-link read,
+        // which never populates selectedGroup in the first place.
+        selectedGroup.value = null
+        viewModelScope.launch { resolveGroupAndShowPicker(vehicle, null) }
     }
 
     private fun pickerState() =

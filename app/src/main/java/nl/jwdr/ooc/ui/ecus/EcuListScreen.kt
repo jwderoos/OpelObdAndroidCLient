@@ -122,12 +122,13 @@ private fun YearPicker(
     )
 }
 
+/** The "choose ECU group" step, shared by every screen that picks an ECU. */
 @Composable
-private fun EcuGroupPicker(
+fun EcuGroupPicker(
     vehicle: VehicleRef,
     groups: List<String>,
     onSelect: (String) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     PickerList(
         title = stringResource(R.string.ecu_list_pick_group),

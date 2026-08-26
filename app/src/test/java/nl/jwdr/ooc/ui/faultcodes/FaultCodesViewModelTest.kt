@@ -13,6 +13,7 @@ import nl.jwdr.ooc.catalogstore.CatalogPayload
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.EcuEntity
 import nl.jwdr.ooc.catalogstore.FakeCatalogDao
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
@@ -128,6 +129,109 @@ class FaultCodesViewModelTest {
 
         assertEquals(
             FaultCodesUiState.PickEcu(listOf(EcuChoice("Engine", "Engine system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `with a vehicle and more than one ECU group the screen offers the group picker`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting an ECU group narrows the picker to that group's ECUs`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcu(listOf(EcuChoice("Engine", "Engine system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `changing the ECU re-offers the group picker when more than one group exists`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+        )
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(readRequest(0x7E0)).respondWith(frame(0x7E8, 0x02, 0x58, 0x00))
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.changeEcu()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `a target ECU passed at navigation reads immediately regardless of its ECU group`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+        )
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(readRequest(0x241)).respondWith(frame(0x249, 0x02, 0x58, 0x00))
+        val viewModel = viewModel(transport, initialEcuName = "ABS")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value as FaultCodesUiState.Faults
+        assertEquals("ABS", state.ecuName)
+        assertEquals(emptyList<FaultEntry>(), state.entries)
+    }
+
+    @Test
+    fun `changing the ECU after a deep-link read still offers the group picker when appropriate`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(
+                canEcu("Engine", 0x7E0).copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+        )
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(readRequest(0x241)).respondWith(frame(0x249, 0x02, 0x58, 0x00))
+        val viewModel = viewModel(transport, initialEcuName = "ABS")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.changeEcu()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            FaultCodesUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
             viewModel.state.value,
         )
     }

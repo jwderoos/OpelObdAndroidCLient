@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.jwdr.ooc.R
 import nl.jwdr.ooc.catalog.OutputTestType
 import nl.jwdr.ooc.ui.UserMessage
+import nl.jwdr.ooc.ui.ecus.EcuGroupPicker
 import nl.jwdr.ooc.ui.faultcodes.EcuChoice
 
 /**
@@ -44,6 +45,11 @@ fun OutputTestsScreen(
     when (val current = state) {
         OutputTestsUiState.Loading -> Unit
         OutputTestsUiState.NoVehicle -> NoVehicle(onOpenEcuList)
+        is OutputTestsUiState.PickEcuGroup -> EcuGroupPicker(
+            vehicle = current.vehicle,
+            groups = current.groups,
+            onSelect = viewModel::selectGroup,
+        )
         is OutputTestsUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
         is OutputTestsUiState.Tests -> {
             TestList(

@@ -25,6 +25,15 @@ data class CatalogSummary(
     val ecuCount: Int,
 )
 
+/** Outcome of resolving which ECU group to query, per [CatalogRepository.resolveEcuGroup]. */
+sealed interface EcuGroupResolution {
+    /** [group] is settled. */
+    data class Resolved(val group: String) : EcuGroupResolution
+
+    /** More than one group exists and none is chosen yet; offer [groups]. */
+    data class NeedsPick(val groups: List<String>) : EcuGroupResolution
+}
+
 class CatalogRepository(
     private val dao: CatalogDao,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -78,6 +87,19 @@ class CatalogRepository(
     /** The diagnosable (CAN-addressed) ECUs of [ref] within [group], as domain definitions. */
     suspend fun canEcusFor(ref: VehicleRef, group: String): List<EcuDefinition> =
         dao.canEcusForVehicleGroup(ref.modelYear, ref.vehicle, group).map { it.toDefinition() }
+
+    /**
+     * Resolves which ECU group to query for [ref]: [selectedGroup] if
+     * already chosen, the vehicle's only group if it has just one, or a pick
+     * request over [groupsFor] otherwise. Mirrors the ECU list's own
+     * skip-if-single group step so every ECU-picking screen behaves alike.
+     */
+    suspend fun resolveEcuGroup(ref: VehicleRef, selectedGroup: String?): EcuGroupResolution {
+        if (selectedGroup != null) return EcuGroupResolution.Resolved(selectedGroup)
+        val groups = groupsFor(ref)
+        val single = groups.singleOrNull()
+        return if (single != null) EcuGroupResolution.Resolved(single) else EcuGroupResolution.NeedsPick(groups)
+    }
 
     /**
      * The parsed fault-code texts of [catalogKey], merging suffixed variant

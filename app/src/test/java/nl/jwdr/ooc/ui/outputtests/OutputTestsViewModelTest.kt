@@ -13,6 +13,7 @@ import nl.jwdr.ooc.catalogstore.CatalogPayload
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.EcuEntity
 import nl.jwdr.ooc.catalogstore.FakeCatalogDao
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
@@ -178,6 +179,70 @@ class OutputTestsViewModelTest {
 
         assertEquals(
             OutputTestsUiState.PickEcu(listOf(EcuChoice("REC", "REC system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `with more than one ECU group the screen offers the group picker`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("REC", 0x240, "RECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(outputTestsFile("RECKEY", scriptText)),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            OutputTestsUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `selecting a group narrows the picker to that group's tested ECUs`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("REC", 0x240, "RECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(outputTestsFile("RECKEY", scriptText)),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            OutputTestsUiState.PickEcu(listOf(EcuChoice("REC", "REC system"))),
+            viewModel.state.value,
+        )
+    }
+
+    @Test
+    fun `changing the ECU re-offers the group picker when more than one group exists`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("REC", 0x240, "RECKEY").copy(groupName = "Engine"),
+                canEcu("ABS", 0x241).copy(groupName = "Chassis"),
+            ),
+            files = listOf(outputTestsFile("RECKEY", scriptText)),
+        )
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectGroup("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("REC")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.changeEcu()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(
+            OutputTestsUiState.PickEcuGroup(VehicleRef("2005", "Astra-H"), listOf("Chassis", "Engine")),
             viewModel.state.value,
         )
     }

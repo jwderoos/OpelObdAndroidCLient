@@ -16,6 +16,8 @@ import nl.jwdr.ooc.catalog.EcuAddress
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.MeasuringBlockCatalog
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.EcuGroupResolution
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.LiveDecodeRuleStore
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
@@ -55,6 +57,9 @@ sealed interface LiveDataUiState {
 
     /** No catalog or no vehicle selected. */
     data object NoVehicle : LiveDataUiState
+
+    /** The selected vehicle has more than one ECU group; offer them. */
+    data class PickEcuGroup(val vehicle: VehicleRef, val groups: List<String>) : LiveDataUiState
 
     /** The selected vehicle's diagnosable ECUs, to pick one. */
     data class PickEcu(val ecus: List<EcuChoice>) : LiveDataUiState
@@ -97,28 +102,46 @@ class LiveDataViewModel(
     private var csvLines: MutableList<String>? = null
     private var logStartMs = 0L
 
+    /** Chosen at the ECU-group step; never persisted, unlike the vehicle selection. */
+    private val selectedGroup = MutableStateFlow<Pair<VehicleRef, String>?>(null)
+
     init {
         viewModelScope.launch {
             combine(
                 repository.summary,
                 repository.selectedVehicle,
-                ::Pair,
-            ).collectLatest { (summary, selected) ->
+                selectedGroup,
+                ::Triple,
+            ).collectLatest { (summary, selected, groupSelection) ->
                 pollJob?.cancel()
                 obd2Targets = null
                 if (summary == null || selected == null) {
                     _state.value = LiveDataUiState.NoVehicle
                     return@collectLatest
                 }
-                // Only modules that actually define live-data measuring blocks:
-                // the picker must not offer ECUs with no capture values (they'd
-                // dead-end on an empty block list).
-                val withBlocks = repository.measuringBlockKeys()
-                definitions = repository.canEcusFor(selected)
-                    .filter { it.catalogKey != null && it.catalogKey in withBlocks }
-                _state.value = pickerState()
+                val group = groupSelection?.takeIf { it.first == selected }?.second
+                when (val resolution = repository.resolveEcuGroup(selected, group)) {
+                    is EcuGroupResolution.NeedsPick -> {
+                        definitions = emptyList()
+                        _state.value = LiveDataUiState.PickEcuGroup(selected, resolution.groups)
+                    }
+                    is EcuGroupResolution.Resolved -> {
+                        // Only modules that actually define live-data measuring
+                        // blocks: the picker must not offer ECUs with no capture
+                        // values (they'd dead-end on an empty block list).
+                        val withBlocks = repository.measuringBlockKeys()
+                        definitions = repository.canEcusFor(selected, resolution.group)
+                            .filter { it.catalogKey != null && it.catalogKey in withBlocks }
+                        _state.value = pickerState()
+                    }
+                }
             }
         }
+    }
+
+    fun selectGroup(group: String) {
+        val vehicle = (_state.value as? LiveDataUiState.PickEcuGroup)?.vehicle ?: return
+        selectedGroup.value = vehicle to group
     }
 
     /**
@@ -293,9 +316,14 @@ class LiveDataViewModel(
         stopPolling()
         currentEcu = null
         currentCatalog = null
-        _state.value = obd2Targets?.let { targets ->
-            LiveDataUiState.PickEcu(targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) })
-        } ?: pickerState()
+        obd2Targets?.let { targets ->
+            _state.value = LiveDataUiState.PickEcu(targets.map { EcuChoice(it.name, OBD2_SYSTEM_NAME) })
+            return
+        }
+        // Re-derive the group too: it may re-offer the group picker when the
+        // vehicle has more than one, exactly like the ECU list does.
+        selectedGroup.value = null
+        _state.value = pickerState()
     }
 
     private fun stopPolling() {

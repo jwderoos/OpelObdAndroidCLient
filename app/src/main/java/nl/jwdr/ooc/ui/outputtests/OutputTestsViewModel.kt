@@ -21,6 +21,8 @@ import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.OutputTest
 import nl.jwdr.ooc.catalog.OutputTestType
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.EcuGroupResolution
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
 import nl.jwdr.ooc.diagnostics.OutputTestRun
@@ -45,6 +47,9 @@ sealed interface OutputTestsUiState {
 
     /** No catalog or no vehicle selected; point the user to the ECU list. */
     data object NoVehicle : OutputTestsUiState
+
+    /** The selected vehicle has more than one ECU group; offer them. */
+    data class PickEcuGroup(val vehicle: VehicleRef, val groups: List<String>) : OutputTestsUiState
 
     /** The selected vehicle's diagnosable ECUs, to pick one. */
     data class PickEcu(val ecus: List<EcuChoice>) : OutputTestsUiState
@@ -91,28 +96,46 @@ class OutputTestsViewModel(
     private var run: OutputTestRun? = null
     private var readoutsJob: Job? = null
 
+    /** Chosen at the ECU-group step; never persisted, unlike the vehicle selection. */
+    private val selectedGroup = MutableStateFlow<Pair<VehicleRef, String>?>(null)
+
     init {
         viewModelScope.launch {
             combine(
                 repository.summary,
                 repository.selectedVehicle,
-                ::Pair,
+                selectedGroup,
+                ::Triple,
                 // Room re-emits on any catalog-table write; only a real
                 // change may kick the user out of a running test.
-            ).distinctUntilChanged().collectLatest { (summary, selected) ->
+            ).distinctUntilChanged().collectLatest { (summary, selected, groupSelection) ->
                 finishRun()
                 if (summary == null || selected == null) {
                     _state.value = OutputTestsUiState.NoVehicle
                     return@collectLatest
                 }
-                // Only modules that actually define catalog output tests:
-                // the picker must not offer ECUs with no tests to run.
-                val withTests = repository.outputTestKeys()
-                definitions = repository.canEcusFor(selected)
-                    .filter { it.catalogKey != null && it.catalogKey in withTests }
-                _state.value = pickerState()
+                val group = groupSelection?.takeIf { it.first == selected }?.second
+                when (val resolution = repository.resolveEcuGroup(selected, group)) {
+                    is EcuGroupResolution.NeedsPick -> {
+                        definitions = emptyList()
+                        _state.value = OutputTestsUiState.PickEcuGroup(selected, resolution.groups)
+                    }
+                    is EcuGroupResolution.Resolved -> {
+                        // Only modules that actually define catalog output tests:
+                        // the picker must not offer ECUs with no tests to run.
+                        val withTests = repository.outputTestKeys()
+                        definitions = repository.canEcusFor(selected, resolution.group)
+                            .filter { it.catalogKey != null && it.catalogKey in withTests }
+                        _state.value = pickerState()
+                    }
+                }
             }
         }
+    }
+
+    fun selectGroup(group: String) {
+        val vehicle = (_state.value as? OutputTestsUiState.PickEcuGroup)?.vehicle ?: return
+        selectedGroup.value = vehicle to group
     }
 
     fun selectEcu(name: String) {
@@ -127,6 +150,9 @@ class OutputTestsViewModel(
     fun changeEcu() {
         val current = _state.value
         if (current is OutputTestsUiState.Tests && current.starting) return
+        // Re-derive the group too: it may re-offer the group picker when the
+        // vehicle has more than one, exactly like the ECU list does.
+        selectedGroup.value = null
         _state.value = pickerState()
     }
 

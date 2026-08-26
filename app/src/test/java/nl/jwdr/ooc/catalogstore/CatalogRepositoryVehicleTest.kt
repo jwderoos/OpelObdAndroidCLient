@@ -152,4 +152,37 @@ class CatalogRepositoryVehicleTest {
 
         assertEquals(listOf("Engine"), definitions.map { it.name })
     }
+
+    @Test
+    fun `resolveEcuGroup resolves the vehicle's only group when none is selected`() = runTest {
+        storeCatalog(canEcu("2005", "Astra-H", "Engine", 0x7E0))
+
+        val resolution = repository.resolveEcuGroup(VehicleRef("2005", "Astra-H"), selectedGroup = null)
+
+        assertEquals(EcuGroupResolution.Resolved("Body"), resolution)
+    }
+
+    @Test
+    fun `resolveEcuGroup asks to pick when more than one group exists and none is selected`() = runTest {
+        storeCatalog(
+            canEcu("2005", "Astra-H", "Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("2005", "Astra-H", "ABS", 0x241).copy(groupName = "Chassis"),
+        )
+
+        val resolution = repository.resolveEcuGroup(VehicleRef("2005", "Astra-H"), selectedGroup = null)
+
+        assertEquals(EcuGroupResolution.NeedsPick(listOf("Chassis", "Engine")), resolution)
+    }
+
+    @Test
+    fun `resolveEcuGroup returns the selected group without re-deriving it`() = runTest {
+        storeCatalog(
+            canEcu("2005", "Astra-H", "Engine", 0x7E0).copy(groupName = "Engine"),
+            canEcu("2005", "Astra-H", "ABS", 0x241).copy(groupName = "Chassis"),
+        )
+
+        val resolution = repository.resolveEcuGroup(VehicleRef("2005", "Astra-H"), selectedGroup = "Chassis")
+
+        assertEquals(EcuGroupResolution.Resolved("Chassis"), resolution)
+    }
 }

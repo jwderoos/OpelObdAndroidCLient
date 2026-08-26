@@ -37,6 +37,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.io.File
 import nl.jwdr.ooc.R
+import nl.jwdr.ooc.ui.ecus.EcuGroupPicker
 import nl.jwdr.ooc.ui.faultcodes.EcuChoice
 
 /**
@@ -65,6 +66,11 @@ fun LiveDataScreen(
     when (val current = state) {
         LiveDataUiState.Loading -> Unit
         LiveDataUiState.NoVehicle -> NoVehicle(onOpenEcuList, viewModel::useObd2)
+        is LiveDataUiState.PickEcuGroup -> EcuGroupPicker(
+            vehicle = current.vehicle,
+            groups = current.groups,
+            onSelect = viewModel::selectGroup,
+        )
         is LiveDataUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
         is LiveDataUiState.PickBlock -> BlockPicker(
             state = current,

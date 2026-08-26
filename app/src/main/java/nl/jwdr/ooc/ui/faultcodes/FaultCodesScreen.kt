@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import nl.jwdr.ooc.R
+import nl.jwdr.ooc.ui.ecus.EcuGroupPicker
 
 /**
  * Fault codes (#12, #15): per-ECU stored DTCs with catalog descriptions,
@@ -40,6 +41,11 @@ fun FaultCodesScreen(
     when (val current = state) {
         FaultCodesUiState.Loading -> Unit
         FaultCodesUiState.NoVehicle -> NoVehicle(onOpenEcuList, viewModel::useObd2)
+        is FaultCodesUiState.PickEcuGroup -> EcuGroupPicker(
+            vehicle = current.vehicle,
+            groups = current.groups,
+            onSelect = viewModel::selectGroup,
+        )
         is FaultCodesUiState.PickEcu -> EcuPicker(current.ecus, viewModel::selectEcu)
         is FaultCodesUiState.Faults -> {
             FaultList(

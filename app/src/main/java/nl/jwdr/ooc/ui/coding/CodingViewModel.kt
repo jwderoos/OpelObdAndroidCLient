@@ -18,6 +18,8 @@ import nl.jwdr.ooc.R
 import nl.jwdr.ooc.catalog.CodingTable
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalogstore.CatalogRepository
+import nl.jwdr.ooc.catalogstore.EcuGroupResolution
+import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.CodingEntryOutcome
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
 import nl.jwdr.ooc.diagnostics.diagnosableCanAddress
@@ -43,6 +45,9 @@ data class CodingEntryDisplay(
 sealed interface CodingUiState {
     data object Loading : CodingUiState
     data object NoVehicle : CodingUiState
+
+    /** The selected vehicle has more than one ECU group; offer them. */
+    data class PickEcuGroup(val vehicle: VehicleRef, val groups: List<String>) : CodingUiState
     data class PickEcu(val ecus: List<EcuChoice>) : CodingUiState
     data class PickTable(val ecuName: String, val tables: List<CodingTableChoice>) : CodingUiState
     data class Entries(
@@ -78,15 +83,19 @@ class CodingViewModel(
     private var loadJob: Job? = null
     private var writeJob: Job? = null
 
+    /** Chosen at the ECU-group step; never persisted, unlike the vehicle selection. */
+    private val selectedGroup = MutableStateFlow<Pair<VehicleRef, String>?>(null)
+
     init {
         viewModelScope.launch {
             combine(
                 repository.summary,
                 repository.selectedVehicle,
-                ::Pair,
+                selectedGroup,
+                ::Triple,
                 // Room re-emits on any catalog-table write; only a real change
                 // may reset the screen out from under a read or a write.
-            ).distinctUntilChanged().collectLatest { (summary, selected) ->
+            ).distinctUntilChanged().collectLatest { (summary, selected, groupSelection) ->
                 loadJob?.cancel()
                 // A genuine catalog/vehicle change invalidates the ECU this
                 // write targets, so the job is cancelled here on purpose: it
@@ -100,13 +109,27 @@ class CodingViewModel(
                     _state.value = CodingUiState.NoVehicle
                     return@collectLatest
                 }
-                val withCoding = repository.codingTableKeys()
-                definitions = repository.canEcusFor(selected).filter {
-                    it.diagnosableCanAddress() != null && it.catalogKey != null && it.catalogKey in withCoding
+                val group = groupSelection?.takeIf { it.first == selected }?.second
+                when (val resolution = repository.resolveEcuGroup(selected, group)) {
+                    is EcuGroupResolution.NeedsPick -> {
+                        definitions = emptyList()
+                        _state.value = CodingUiState.PickEcuGroup(selected, resolution.groups)
+                    }
+                    is EcuGroupResolution.Resolved -> {
+                        val withCoding = repository.codingTableKeys()
+                        definitions = repository.canEcusFor(selected, resolution.group).filter {
+                            it.diagnosableCanAddress() != null && it.catalogKey != null && it.catalogKey in withCoding
+                        }
+                        _state.value = pickerState()
+                    }
                 }
-                _state.value = pickerState()
             }
         }
+    }
+
+    fun selectGroup(group: String) {
+        val vehicle = (_state.value as? CodingUiState.PickEcuGroup)?.vehicle ?: return
+        selectedGroup.value = vehicle to group
     }
 
     fun selectEcu(name: String) {
@@ -139,6 +162,9 @@ class CodingViewModel(
         writeJob?.cancel()
         currentDefinition = null
         currentTable = null
+        // Re-derive the group too: it may re-offer the group picker when the
+        // vehicle has more than one, exactly like the ECU list does.
+        selectedGroup.value = null
         _state.value = pickerState()
     }
 
