@@ -67,6 +67,32 @@ class LiveDataTest {
     )
 
     @Test
+    fun `with a decode ruleset each row reads its own DPID byte, scaled`() = runTest {
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(scheduleRequest).respondWith(
+            dpidFrame(0x01, 0x03, 0x14, 0x6a, 0x7a, 0x00, 0x00, 0x00),
+            dpidFrame(0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+        )
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+        val ruleRows = listOf(
+            DataRow(label = "Driver Door", states = listOf("Closed", "Open")),
+            DataRow(label = "System Voltage", unit = "V"),
+        )
+        val decodeRules = mapOf(
+            1 to nl.jwdr.ooc.catalog.LiveDecodeRule.Flag(dpid = 1, byte = 0, mask = 1, eq = 1),
+            2 to nl.jwdr.ooc.catalog.LiveDecodeRule.Numeric(dpid = 1, byte = 3, factor = 0.1),
+        )
+
+        val reading = manager.pollMeasuringBlock(
+            engine, block.copy(enabledRows = 1..2), ruleRows, 100.milliseconds, decodeRules,
+        ).first()
+
+        assertEquals("Open", reading.rows[0].display) // byte0=0x03 bit0 set
+        assertEquals("12.2", reading.rows[1].display) // byte3=0x7a=122 x0.1
+    }
+
+    @Test
     fun `a reading decodes the scheduled DPID broadcasts at seven bytes per DPID`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
         transport.onFrame(scheduleRequest).respondWith(

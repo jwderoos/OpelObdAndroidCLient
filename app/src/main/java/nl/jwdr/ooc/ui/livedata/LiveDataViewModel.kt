@@ -17,6 +17,7 @@ import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.MeasuringBlockCatalog
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.diagnostics.LiveDecodeRuleStore
 import nl.jwdr.ooc.diagnostics.EcuScanTarget
 import nl.jwdr.ooc.diagnostics.LiveDataCsv
 import nl.jwdr.ooc.diagnostics.Obd2Value
@@ -78,6 +79,7 @@ class LiveDataViewModel(
     private val repository: CatalogRepository,
     private val diagnosticsManager: DiagnosticsManager,
     private val csvStore: LiveDataCsvStore,
+    private val ruleStore: LiveDecodeRuleStore,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ViewModel() {
 
@@ -180,7 +182,8 @@ class LiveDataViewModel(
                     secondaryId = address.secondaryId.takeIf { it != 0 },
                     bus = address.bus,
                 )
-                diagnosticsManager.pollMeasuringBlock(target, block, rows, POLL_INTERVAL)
+                val decodeRules = definition.catalogKey?.let { ruleStore.rulesFor(it) } ?: emptyMap()
+                diagnosticsManager.pollMeasuringBlock(target, block, rows, POLL_INTERVAL, decodeRules)
                     .collect { reading -> onReading(definition.name, reading) }
             } catch (e: CancellationException) {
                 throw e

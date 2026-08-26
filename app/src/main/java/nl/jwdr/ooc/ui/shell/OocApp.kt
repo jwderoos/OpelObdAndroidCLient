@@ -133,6 +133,7 @@ fun OocApp() {
                                 it.catalogRepository,
                                 it.diagnosticsManager,
                                 it.liveDataCsvStore,
+                                it.liveDecodeRuleStore,
                             )
                         },
                         onOpenEcuList = { navController.navigate(Route.EcuList()) },

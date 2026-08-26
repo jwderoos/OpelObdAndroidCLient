@@ -22,6 +22,7 @@ import nl.jwdr.ooc.catalogstore.CatalogDatabase
 import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.diagnostics.BluetoothSppLink
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.diagnostics.LiveDecodeRuleStore
 import nl.jwdr.ooc.diagnostics.SessionCaptureStore
 import nl.jwdr.ooc.diagnostics.TransportSelection
 import nl.jwdr.ooc.diagnostics.UsbSerialOpComLink
@@ -224,6 +225,11 @@ class AppContainer(context: Context) {
 
     val liveDataCsvStore: LiveDataCsvStore by lazy {
         FileLiveDataCsvStore(File(context.filesDir, "livedata"))
+    }
+
+    /** Bundled GMLAN live-data decode ruleset (assets/live_decode_rules.json). */
+    val liveDecodeRuleStore: LiveDecodeRuleStore by lazy {
+        LiveDecodeRuleStore { appContext.assets.open("live_decode_rules.json") }
     }
 
     private companion object {

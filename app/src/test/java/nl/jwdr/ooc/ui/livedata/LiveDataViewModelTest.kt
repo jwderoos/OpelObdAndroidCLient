@@ -15,6 +15,7 @@ import nl.jwdr.ooc.catalogstore.CatalogRepository
 import nl.jwdr.ooc.catalogstore.EcuEntity
 import nl.jwdr.ooc.catalogstore.FakeCatalogDao
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.diagnostics.LiveDecodeRuleStore
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
 import nl.jwdr.ooc.transport.ObdTransport
@@ -56,6 +57,7 @@ class LiveDataViewModelTest {
         repository,
         DiagnosticsManager(transport),
         csvStore,
+        LiveDecodeRuleStore { "{}".byteInputStream() },
         clock = { nowMs },
     )
 
