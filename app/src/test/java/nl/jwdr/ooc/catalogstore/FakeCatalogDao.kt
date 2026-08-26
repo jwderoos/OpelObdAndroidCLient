@@ -55,6 +55,8 @@ class FakeCatalogDao : CatalogDao {
     }
     override suspend fun filesFor(kind: String, fileKey: String): List<CatalogFileEntity> =
         stored.value?.files?.filter { it.kind == kind && it.fileKey == fileKey }.orEmpty()
+    override suspend fun fileKeysFor(kind: String): List<String> =
+        stored.value?.files?.filter { it.kind == kind }?.map { it.fileKey }?.distinct().orEmpty()
     override suspend fun deleteCatalogs() { stored.value = null }
     override suspend fun deleteEcus() {}
     override suspend fun deleteFiles() {}

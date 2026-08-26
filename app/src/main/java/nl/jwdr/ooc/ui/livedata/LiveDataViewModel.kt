@@ -110,7 +110,12 @@ class LiveDataViewModel(
                     _state.value = LiveDataUiState.NoVehicle
                     return@collectLatest
                 }
+                // Only modules that actually define live-data measuring blocks:
+                // the picker must not offer ECUs with no capture values (they'd
+                // dead-end on an empty block list).
+                val withBlocks = repository.measuringBlockKeys()
                 definitions = repository.canEcusFor(selected)
+                    .filter { it.catalogKey != null && it.catalogKey in withBlocks }
                 _state.value = pickerState()
             }
         }

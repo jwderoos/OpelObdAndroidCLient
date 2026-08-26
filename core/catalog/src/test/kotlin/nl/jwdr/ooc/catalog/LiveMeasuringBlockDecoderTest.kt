@@ -34,6 +34,17 @@ class LiveMeasuringBlockDecoderTest {
     }
 
     @Test
+    fun `numeric rule applies an affine offset`() {
+        val temp = DataRow("Coolant", unit = "C")
+        // byte0 = 0x03 -> 3 * 2.0 + (-40.0) = -34
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(temp), dpidBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 1, byte = 0, factor = 2.0, offset = -40.0)),
+        ).single()
+        assertEquals("-34", r.display)
+    }
+
+    @Test
     fun `flag rule selects state 1 when the masked bits equal eq, else state 0`() {
         val door = DataRow("Driver Door", states = listOf("Door Closed", "Door Open"))
         val rules = mapOf(1 to LiveDecodeRule.Flag(dpid = 1, byte = 0, mask = 1, eq = 1))

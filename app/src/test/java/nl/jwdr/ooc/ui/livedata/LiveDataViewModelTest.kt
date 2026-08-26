@@ -153,18 +153,19 @@ class LiveDataViewModelTest {
     }
 
     @Test
-    fun `with a vehicle the screen offers the ECU picker`() = runTest(dispatcher) {
-        storeCatalog(listOf(canEcu("ABS", 0x241), canEcu("Engine", 0x7E0)))
+    fun `the ECU picker lists only modules that have a measuring-block file`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("ABS", 0x241), // no catalogKey / no MBF -> no live data
+                canEcu("Engine", 0x7E0, catalogKey = "ENG"),
+            ),
+            files = listOf(measuringBlocksFile("ENG")),
+        )
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(
-            LiveDataUiState.PickEcu(
-                listOf(
-                    EcuChoice("ABS", "ABS system"),
-                    EcuChoice("Engine", "Engine system"),
-                ),
-            ),
+            LiveDataUiState.PickEcu(listOf(EcuChoice("Engine", "Engine system"))),
             viewModel.state.value,
         )
     }
@@ -188,18 +189,12 @@ class LiveDataViewModelTest {
     }
 
     @Test
-    fun `an ECU without measuring blocks offers none`() = runTest(dispatcher) {
+    fun `an ECU without measuring blocks is not offered at all`() = runTest(dispatcher) {
         storeCatalog(ecus = listOf(canEcu("Engine", 0x7E0)))
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 
-        viewModel.selectEcu("Engine")
-        dispatcher.scheduler.advanceUntilIdle()
-
-        assertEquals(
-            LiveDataUiState.PickBlock("Engine", emptyList()),
-            viewModel.state.value,
-        )
+        assertEquals(LiveDataUiState.PickEcu(emptyList()), viewModel.state.value)
     }
 
     private suspend fun storeEngineWithBlocks() = storeCatalog(

@@ -41,7 +41,7 @@ class LiveDecodeRuleStore(open: () -> InputStream) {
             val dpid = getInt("dpid")
             val byte = getInt("byte")
             return when (val t = getString("t")) {
-                "num" -> LiveDecodeRule.Numeric(dpid, byte, getDouble("factor"))
+                "num" -> LiveDecodeRule.Numeric(dpid, byte, getDouble("factor"), optDouble("offset", 0.0))
                 "state" -> LiveDecodeRule.StateByte(dpid, byte)
                 "menum" -> LiveDecodeRule.MaskedState(dpid, byte, getInt("mask"))
                 "flag" -> LiveDecodeRule.Flag(dpid, byte, getInt("mask"), getInt("eq"))

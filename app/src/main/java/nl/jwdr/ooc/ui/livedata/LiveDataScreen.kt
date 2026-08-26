@@ -1,6 +1,7 @@
 package nl.jwdr.ooc.ui.livedata
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,6 +50,17 @@ fun LiveDataScreen(
     onOpenEcuList: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    // Back steps one level within this screen (Live -> block picker -> ECU
+    // picker) instead of leaving live data entirely; from the ECU picker it
+    // falls through to the caller's navigation (previous menu).
+    BackHandler(enabled = state is LiveDataUiState.Live || state is LiveDataUiState.PickBlock) {
+        when (state) {
+            is LiveDataUiState.Live -> viewModel.changeBlock()
+            is LiveDataUiState.PickBlock -> viewModel.changeEcu()
+            else -> Unit
+        }
+    }
 
     when (val current = state) {
         LiveDataUiState.Loading -> Unit

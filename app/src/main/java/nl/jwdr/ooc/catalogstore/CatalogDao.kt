@@ -51,6 +51,9 @@ interface CatalogDao {
     @Query("SELECT * FROM catalog_files WHERE kind = :kind AND fileKey = :fileKey")
     suspend fun filesFor(kind: String, fileKey: String): List<CatalogFileEntity>
 
+    @Query("SELECT DISTINCT fileKey FROM catalog_files WHERE kind = :kind")
+    suspend fun fileKeysFor(kind: String): List<String>
+
     @Query("DELETE FROM catalogs")
     suspend fun deleteCatalogs()
 

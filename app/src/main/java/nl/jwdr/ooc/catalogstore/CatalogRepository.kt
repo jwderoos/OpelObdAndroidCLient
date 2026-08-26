@@ -86,6 +86,10 @@ class CatalogRepository(
      * no measuring-block file for the key. Row indices are per-file, so
      * unlike fault codes, variant files cannot be merged; the first file wins.
      */
+    /** Catalog keys that have a measuring-blocks file (i.e. offer live data). */
+    suspend fun measuringBlockKeys(): Set<String> =
+        dao.fileKeysFor(CatalogFileKind.MEASURING_BLOCKS.name).toSet()
+
     suspend fun measuringBlocksFor(catalogKey: String): MeasuringBlockCatalog? {
         val file = dao.filesFor(CatalogFileKind.MEASURING_BLOCKS.name, catalogKey).firstOrNull()
             ?: return null

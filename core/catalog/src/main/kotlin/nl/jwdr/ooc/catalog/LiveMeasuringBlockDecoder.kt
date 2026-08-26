@@ -14,8 +14,13 @@ sealed interface LiveDecodeRule {
     val dpid: Int
     val byte: Int
 
-    /** Physical value = raw byte × [factor], shown with the row's unit. */
-    data class Numeric(override val dpid: Int, override val byte: Int, val factor: Double) : LiveDecodeRule
+    /** Physical value = raw byte × [factor] + [offset], shown with the row's unit. */
+    data class Numeric(
+        override val dpid: Int,
+        override val byte: Int,
+        val factor: Double,
+        val offset: Double = 0.0,
+    ) : LiveDecodeRule
 
     /** State label = `row.states[rawByte]` (the raw byte is a direct index). */
     data class StateByte(override val dpid: Int, override val byte: Int) : LiveDecodeRule
@@ -69,7 +74,7 @@ object LiveMeasuringBlockDecoder {
     private fun display(row: DataRow, rule: LiveDecodeRule?, raw: Int?): String {
         if (rule == null || raw == null) return MeasuringBlockDecoder.NO_DATA
         return when (rule) {
-            is LiveDecodeRule.Numeric -> formatScaled(raw * rule.factor)
+            is LiveDecodeRule.Numeric -> formatScaled(raw * rule.factor + rule.offset)
             is LiveDecodeRule.StateByte -> row.states.getOrNull(raw) ?: "0x%02X".format(raw)
             is LiveDecodeRule.MaskedState -> {
                 val index = (raw and rule.mask) ushr Integer.numberOfTrailingZeros(rule.mask)
