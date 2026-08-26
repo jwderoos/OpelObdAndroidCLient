@@ -96,6 +96,10 @@ class CatalogRepository(
         return MeasuringBlockParser.parse(CatalogText.decode(file.content), file.fileName)
     }
 
+    /** Catalog keys that have an output-tests file (i.e. offer output tests). */
+    suspend fun outputTestKeys(): Set<String> =
+        dao.fileKeysFor(CatalogFileKind.OUTPUT_TESTS.name).toSet()
+
     /**
      * The parsed output tests of [catalogKey]; null when the catalog has no
      * output-test file for the key. Like measuring blocks, variant files are

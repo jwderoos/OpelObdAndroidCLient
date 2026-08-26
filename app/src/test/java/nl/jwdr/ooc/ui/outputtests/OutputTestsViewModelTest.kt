@@ -165,8 +165,14 @@ class OutputTestsViewModelTest {
     }
 
     @Test
-    fun `with a vehicle the screen offers the ECU picker`() = runTest(dispatcher) {
-        storeCatalog(listOf(canEcu("REC", 0x240, "RECKEY")))
+    fun `the ECU picker lists only modules that have an output-test file`() = runTest(dispatcher) {
+        storeCatalog(
+            ecus = listOf(
+                canEcu("ABS", 0x241), // no catalogKey / no SCR -> no output tests
+                canEcu("REC", 0x240, "RECKEY"),
+            ),
+            files = listOf(outputTestsFile("RECKEY", scriptText)),
+        )
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 
@@ -174,6 +180,15 @@ class OutputTestsViewModelTest {
             OutputTestsUiState.PickEcu(listOf(EcuChoice("REC", "REC system"))),
             viewModel.state.value,
         )
+    }
+
+    @Test
+    fun `an ECU without an output-test file is not offered at all`() = runTest(dispatcher) {
+        storeCatalog(listOf(canEcu("REC", 0x240, "RECKEY")))
+        val viewModel = viewModel(FakeEcuTransport(backgroundScope))
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(OutputTestsUiState.PickEcu(emptyList()), viewModel.state.value)
     }
 
     @Test
@@ -197,8 +212,11 @@ class OutputTestsViewModelTest {
     }
 
     @Test
-    fun `an ECU without output tests shows an empty list`() = runTest(dispatcher) {
-        storeCatalog(listOf(canEcu("REC", 0x240, "RECKEY")))
+    fun `an ECU whose output-test file defines no tests shows an empty list`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(canEcu("REC", 0x240, "RECKEY")),
+            listOf(outputTestsFile("RECKEY", "")),
+        )
         val viewModel = viewModel(FakeEcuTransport(backgroundScope))
         dispatcher.scheduler.advanceUntilIdle()
 

@@ -105,7 +105,11 @@ class OutputTestsViewModel(
                     _state.value = OutputTestsUiState.NoVehicle
                     return@collectLatest
                 }
+                // Only modules that actually define catalog output tests:
+                // the picker must not offer ECUs with no tests to run.
+                val withTests = repository.outputTestKeys()
                 definitions = repository.canEcusFor(selected)
+                    .filter { it.catalogKey != null && it.catalogKey in withTests }
                 _state.value = pickerState()
             }
         }
