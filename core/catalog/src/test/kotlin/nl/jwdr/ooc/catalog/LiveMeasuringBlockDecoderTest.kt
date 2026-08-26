@@ -96,6 +96,24 @@ class LiveMeasuringBlockDecoderTest {
     }
 
     @Test
+    fun `masked-state rule shifts the masked bits down and indexes the state list`() {
+        val hardtopSwitch = DataRow(
+            "Hardtop Switch", states = listOf("Inactive", "Opening", "Closing", "Invalid"),
+        )
+        // DPID1 byte0 = 0x03; low 2 bits (mask 3) = 3 -> "Invalid".
+        val low = LiveMeasuringBlockDecoder.decode(
+            1, listOf(hardtopSwitch), dpidBytes, mapOf(1 to LiveDecodeRule.MaskedState(dpid = 1, byte = 0, mask = 3)),
+        ).single()
+        assertEquals("Invalid", low.display)
+        // A high 2-bit field (mask 0x60) is shifted down before indexing:
+        // byte1 = 0x14 -> (0x14 & 0x60) >> 5 = 0 -> "Inactive".
+        val high = LiveMeasuringBlockDecoder.decode(
+            1, listOf(hardtopSwitch), dpidBytes, mapOf(1 to LiveDecodeRule.MaskedState(dpid = 1, byte = 1, mask = 0x60)),
+        ).single()
+        assertEquals("Inactive", high.display)
+    }
+
+    @Test
     fun `a whole-number scaled value prints without a trailing point`() {
         val row = DataRow("Speed", unit = "km/h")
         // byte0 = 0x03, factor 1.0 -> "3", not "3.0"

@@ -20,6 +20,13 @@ sealed interface LiveDecodeRule {
     /** State label = `row.states[rawByte]` (the raw byte is a direct index). */
     data class StateByte(override val dpid: Int, override val byte: Int) : LiveDecodeRule
 
+    /**
+     * State label for a bit-field: `row.states[(byte & mask) ushr ctz(mask)]`.
+     * Covers multi-state rows the vendor encodes as a contiguous group of bits
+     * (e.g. a 2-bit "Inactive/Opening/Closing/Invalid" field at `byte & 3`).
+     */
+    data class MaskedState(override val dpid: Int, override val byte: Int, val mask: Int) : LiveDecodeRule
+
     /** Two-state: `row.states[1]` when `(byte & mask) == eq`, else `row.states[0]`. */
     data class Flag(override val dpid: Int, override val byte: Int, val mask: Int, val eq: Int) : LiveDecodeRule
 
@@ -64,6 +71,10 @@ object LiveMeasuringBlockDecoder {
         return when (rule) {
             is LiveDecodeRule.Numeric -> formatScaled(raw * rule.factor)
             is LiveDecodeRule.StateByte -> row.states.getOrNull(raw) ?: "0x%02X".format(raw)
+            is LiveDecodeRule.MaskedState -> {
+                val index = (raw and rule.mask) ushr Integer.numberOfTrailingZeros(rule.mask)
+                row.states.getOrNull(index) ?: index.toString()
+            }
             is LiveDecodeRule.Flag -> {
                 val index = if (raw and rule.mask == rule.eq) 1 else 0
                 row.states.getOrNull(index) ?: index.toString()

@@ -43,6 +43,7 @@ class LiveDecodeRuleStore(open: () -> InputStream) {
             return when (val t = getString("t")) {
                 "num" -> LiveDecodeRule.Numeric(dpid, byte, getDouble("factor"))
                 "state" -> LiveDecodeRule.StateByte(dpid, byte)
+                "menum" -> LiveDecodeRule.MaskedState(dpid, byte, getInt("mask"))
                 "flag" -> LiveDecodeRule.Flag(dpid, byte, getInt("mask"), getInt("eq"))
                 "raw" -> LiveDecodeRule.RawByte(dpid, byte)
                 else -> error("unknown decode rule type '$t'")

@@ -12,7 +12,8 @@ class LiveDecodeRuleStoreTest {
           {"row":1,"dpid":1,"t":"flag","byte":0,"mask":1,"eq":1},
           {"row":11,"dpid":1,"t":"num","byte":3,"factor":0.1},
           {"row":39,"dpid":126,"t":"state","byte":0},
-          {"row":12,"dpid":2,"t":"raw","byte":0}
+          {"row":12,"dpid":2,"t":"raw","byte":0},
+          {"row":4,"dpid":4,"t":"menum","byte":0,"mask":3}
         ]}
     """.trimIndent()
 
@@ -25,6 +26,7 @@ class LiveDecodeRuleStoreTest {
         assertEquals(LiveDecodeRule.Numeric(dpid = 1, byte = 3, factor = 0.1), rec[11])
         assertEquals(LiveDecodeRule.StateByte(dpid = 126, byte = 0), rec[39])
         assertEquals(LiveDecodeRule.RawByte(dpid = 2, byte = 0), rec[12])
+        assertEquals(LiveDecodeRule.MaskedState(dpid = 4, byte = 0, mask = 3), rec[4])
     }
 
     @Test
