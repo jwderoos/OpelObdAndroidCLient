@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import nl.jwdr.ooc.catalog.BlockReading
+import nl.jwdr.ooc.catalog.CodingTable
 import nl.jwdr.ooc.catalog.DataRow
 import nl.jwdr.ooc.catalog.DisplayTagBindings
 import nl.jwdr.ooc.catalog.MeasuringBlock
@@ -40,7 +41,9 @@ import nl.jwdr.ooc.protocol.isotp.IsoTpAddress
 import nl.jwdr.ooc.protocol.kwp2000.ClearDiagnosticInformation
 import nl.jwdr.ooc.protocol.kwp2000.Dtc
 import nl.jwdr.ooc.protocol.kwp2000.ReadDTCByStatus
+import nl.jwdr.ooc.protocol.kwp2000.ReadECUIdentification
 import nl.jwdr.ooc.protocol.kwp2000.RawRequest
+import nl.jwdr.ooc.protocol.kwp2000.WriteDataByLocalIdentifier
 import nl.jwdr.ooc.protocol.obd2.ClearEmissionData
 import nl.jwdr.ooc.protocol.obd2.Obd2Pid
 import nl.jwdr.ooc.protocol.obd2.Obd2Pids
@@ -255,6 +258,83 @@ class DiagnosticsManager(
                 session.execute(ClearDiagnosticInformation(DTC_GROUP_ALL))
                 session.execute(ReadDTCByStatus(DTC_STATUS_ALL, DTC_GROUP_ALL)).dtcs
             }
+        }
+    }
+
+    /**
+     * Reads every entry of [table] from [target], in `table.didEntries` order.
+     * Raw bytes only (issue #18 v1): the DID-to-row mapping is not established
+     * (docs/catalog-format.md), so this returns each entry's record verbatim,
+     * not decoded coding values. Failures propagate as [SessionException]s,
+     * like every other read in this class.
+     */
+    suspend fun readCoding(target: EcuScanTarget, table: CodingTable): CodingReadResult {
+        annotate("readCoding", target)
+        return withSession(target, SessionConfig()) { session ->
+            CodingReadResult(
+                table.didEntries.map { entry ->
+                    CodingEntryRead(entry.id, session.execute(ReadECUIdentification(entry.id)).record)
+                },
+            )
+        }
+    }
+
+    /**
+     * Writes [edits] (entry id -> new raw record) into [table]'s entries on
+     * [target], then re-reads every entry to verify. Destructive: callers
+     * must obtain explicit user confirmation first (design spec safety
+     * rule), behind the expert-mode toggle (issue #18). No SecurityAccess
+     * unlock is attempted — issue #36 tracks that gap; the only real
+     * capture of this flow used none.
+     *
+     * On the first write failure, every remaining edited entry is left
+     * [CodingEntryOutcome.NotAttempted] rather than attempted: a
+     * half-applied coding record is the real risk here, not one bad value.
+     */
+    suspend fun writeCoding(
+        target: EcuScanTarget,
+        table: CodingTable,
+        edits: Map<Int, ByteArray>,
+    ): CodingWriteResult {
+        annotate("writeCoding", target)
+        val knownIds = table.didEntries.map { it.id }.toSet()
+        require(edits.keys.all { it in knownIds }) {
+            "writeCoding: edits contains an id not in table.didEntries: ${edits.keys - knownIds}"
+        }
+        return withSession(target, SessionConfig()) { session ->
+            var failed = false
+            val outcomes = mutableMapOf<Int, CodingEntryOutcome>()
+            for (entry in table.didEntries) {
+                if (entry.id !in edits) continue
+                if (failed) {
+                    outcomes[entry.id] = CodingEntryOutcome.NotAttempted(entry.id)
+                    continue
+                }
+                try {
+                    session.execute(WriteDataByLocalIdentifier(entry.id, edits.getValue(entry.id)))
+                } catch (e: SessionException) {
+                    failed = true
+                    outcomes[entry.id] = CodingEntryOutcome.Failed(entry.id, e.message ?: e.toString())
+                }
+            }
+            val reread = table.didEntries.map { entry ->
+                CodingEntryRead(entry.id, session.execute(ReadECUIdentification(entry.id)).record)
+            }
+            val rereadById = reread.associateBy { it.id }
+            for (id in edits.keys) {
+                if (outcomes.containsKey(id)) continue
+                val expected = edits.getValue(id)
+                val actual = rereadById.getValue(id).bytes
+                outcomes[id] = if (actual.contentEquals(expected)) {
+                    CodingEntryOutcome.Written(id, actual)
+                } else {
+                    CodingEntryOutcome.VerificationMismatch(id, expected, actual)
+                }
+            }
+            CodingWriteResult(
+                outcomes = table.didEntries.mapNotNull { outcomes[it.id] },
+                entries = reread,
+            )
         }
     }
 

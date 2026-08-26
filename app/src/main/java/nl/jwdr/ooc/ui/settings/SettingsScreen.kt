@@ -51,6 +51,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
     Column(modifier = modifier.verticalScroll(rememberScrollState())) {
         AdapterSection(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
+        ExpertModeSection(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp))
         CatalogScreen(
             state = state,
             onImportFolder = { folderPicker.launch(null) },

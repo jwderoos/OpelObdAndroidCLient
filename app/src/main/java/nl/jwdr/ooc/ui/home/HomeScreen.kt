@@ -30,6 +30,7 @@ import nl.jwdr.ooc.ui.navigation.Route
 @Composable
 fun HomeScreen(
     connectionState: ConnectionState,
+    expertMode: Boolean,
     onToggleConnection: () -> Unit,
     onNavigate: (Route) -> Unit,
 ) {
@@ -49,7 +50,7 @@ fun HomeScreen(
             Text(stringResource(R.string.action_scan_all))
         }
 
-        for (item in HOME_MENU) {
+        for (item in HOME_MENU.filter { it.route != Route.Coding || expertMode }) {
             Card(
                 onClick = { onNavigate(item.route) },
                 modifier = Modifier.fillMaxWidth(),

@@ -7,6 +7,8 @@ import nl.jwdr.ooc.catalog.CatalogFileKind
 import nl.jwdr.ooc.catalog.CatalogImporter
 import nl.jwdr.ooc.catalog.CatalogText
 import nl.jwdr.ooc.catalog.CatalogTree
+import nl.jwdr.ooc.catalog.CodingTable
+import nl.jwdr.ooc.catalog.CodingTableParser
 import nl.jwdr.ooc.catalog.EcuDefinition
 import nl.jwdr.ooc.catalog.FaultCodeCatalog
 import nl.jwdr.ooc.catalog.FaultCodeParser
@@ -110,6 +112,16 @@ class CatalogRepository(
             ?: return null
         return OutputTestParser.parse(CatalogText.decode(file.content), file.fileName)
     }
+
+    /** Catalog keys that have a coding file (i.e. offer ECU coding). */
+    suspend fun codingTableKeys(): Set<String> =
+        dao.fileKeysFor(CatalogFileKind.CODING.name).toSet()
+
+    /** Every coding table for [catalogKey] — one per `.0x<DID>.txt` file, unlike measuring blocks/output tests, none are merged or "first wins": each is a distinct DID table. */
+    suspend fun codingTablesFor(catalogKey: String): List<CodingTable> =
+        dao.filesFor(CatalogFileKind.CODING.name, catalogKey).map {
+            CodingTableParser.parse(CatalogText.decode(it.content), it.fileName)
+        }
 
     suspend fun faultCodesFor(catalogKey: String): FaultCodeCatalog? {
         val files = dao.filesFor(CatalogFileKind.ERROR_CODES.name, catalogKey)

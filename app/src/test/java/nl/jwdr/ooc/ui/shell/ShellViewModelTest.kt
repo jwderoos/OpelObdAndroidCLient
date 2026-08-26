@@ -2,6 +2,7 @@ package nl.jwdr.ooc.ui.shell
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -34,7 +35,7 @@ class ShellViewModelTest {
 
     @Test
     fun `toggleConnection connects when disconnected`() = runTest(dispatcher.scheduler) {
-        val viewModel = ShellViewModel(DiagnosticsManager(FakeEcuTransport(backgroundScope)))
+        val viewModel = ShellViewModel(DiagnosticsManager(FakeEcuTransport(backgroundScope)), MutableStateFlow(false))
 
         viewModel.toggleConnection()
         dispatcher.scheduler.advanceUntilIdle()
@@ -46,7 +47,7 @@ class ShellViewModelTest {
     fun `toggleConnection disconnects when ready`() = runTest(dispatcher.scheduler) {
         val manager = DiagnosticsManager(FakeEcuTransport(backgroundScope))
         manager.connect()
-        val viewModel = ShellViewModel(manager)
+        val viewModel = ShellViewModel(manager, MutableStateFlow(false))
 
         viewModel.toggleConnection()
         dispatcher.scheduler.advanceUntilIdle()
@@ -61,7 +62,7 @@ class ShellViewModelTest {
         // (the state drives the UI) — uncaught, it would kill the process.
         val link = ScriptedElm327Link()
         link.on("ATZ", "?\r\r>")
-        val viewModel = ShellViewModel(DiagnosticsManager(Elm327Transport(link)))
+        val viewModel = ShellViewModel(DiagnosticsManager(Elm327Transport(link)), MutableStateFlow(false))
 
         viewModel.toggleConnection()
         dispatcher.scheduler.advanceUntilIdle()
@@ -71,7 +72,7 @@ class ShellViewModelTest {
 
     @Test
     fun `exposes the simulated flag for the badge`() = runTest(dispatcher.scheduler) {
-        val viewModel = ShellViewModel(DiagnosticsManager(FakeEcuTransport(backgroundScope)))
+        val viewModel = ShellViewModel(DiagnosticsManager(FakeEcuTransport(backgroundScope)), MutableStateFlow(false))
 
         assertTrue(viewModel.isSimulated.value)
     }

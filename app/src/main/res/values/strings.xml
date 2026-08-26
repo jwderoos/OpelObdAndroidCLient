@@ -21,7 +21,6 @@
     <string name="action_scan_all">Scan all ECUs</string>
     <string name="cd_back">Back</string>
     <string name="cd_settings">Settings</string>
-    <string name="placeholder_screen">Not implemented yet — tracked in issue #%1$d.</string>
 
     <!-- ECU list / bus scan -->
     <string name="ecu_list_no_catalog">No diagnostic catalog imported yet. Import one in Settings to scan for control units.</string>
@@ -93,6 +92,31 @@
     <string name="output_test_active">Output is activated</string>
     <string name="output_test_inactive">Output is deactivated</string>
     <string name="action_stop_test">Stop test</string>
+
+    <!-- Coding (#18) -->
+    <string name="coding_invalid_hex">Edited value must be exactly %1$d hex bytes.</string>
+    <string name="coding_expert_mode_required">Expert mode is off.</string>
+    <string name="coding_no_vehicle">Select a vehicle on the ECU list screen to code its control units.</string>
+    <string name="coding_pick_ecu">Choose a control unit</string>
+    <string name="coding_pick_table">Choose a coding table</string>
+    <string name="coding_entries_none">This coding table defines no entries.</string>
+    <string name="coding_reading">Reading coding…</string>
+    <string name="coding_writing">Writing coding…</string>
+    <string name="action_change_table">Change table</string>
+    <string name="action_write_coding">Write changes</string>
+    <string name="action_revert">Revert</string>
+    <string name="coding_entry_was">was: %1$s</string>
+    <string name="coding_review_changes">Review changes</string>
+    <!-- id, current hex, edited hex -->
+    <string name="coding_change_line">%1$s: %2$s → %3$s</string>
+    <string name="coding_write_dialog_title">Write coding changes?</string>
+    <string name="coding_write_dialog_message">This permanently rewrites %1$d coding value(s) on this control unit. An incorrect value can cause a module to malfunction or disable features. Only proceed if you know what these values mean.</string>
+    <string name="coding_write_dialog_confirm">Write</string>
+    <string name="coding_write_dialog_cancel">Cancel</string>
+    <string name="coding_outcome_written">Written</string>
+    <string name="coding_outcome_not_attempted">Not attempted</string>
+    <string name="coding_outcome_failed">Failed: %1$s</string>
+    <string name="coding_outcome_mismatch">Did not verify — expected %1$s, read back %2$s</string>
 
     <!-- Protocol failure messages (see ProtocolErrorMessages.kt) -->
     <string name="error_response_timeout">The control unit did not respond in time.</string>

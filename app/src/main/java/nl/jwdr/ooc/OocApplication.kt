@@ -102,6 +102,26 @@ class AppContainer(context: Context) {
         debugPrefs.edit().putBoolean(PREF_RECORD_SESSIONS, enabled).apply()
     }
 
+    private val expertPrefs by lazy {
+        appContext.getSharedPreferences("expert", Context.MODE_PRIVATE)
+    }
+
+    private val _expertMode by lazy {
+        MutableStateFlow(expertPrefs.getBoolean(PREF_EXPERT_MODE, false))
+    }
+
+    /**
+     * Off by default. Gates the Coding screen (issue #18): writing ECU
+     * coding can disable vehicle features or malfunction a module, so it
+     * stays behind an explicit opt-in separate from debug instrumentation.
+     */
+    val expertMode: StateFlow<Boolean> by lazy { _expertMode }
+
+    fun setExpertMode(enabled: Boolean) {
+        _expertMode.value = enabled
+        expertPrefs.edit().putBoolean(PREF_EXPERT_MODE, enabled).apply()
+    }
+
     val sessionCaptureStore: SessionCaptureStore by lazy {
         SessionCaptureStore(File(appContext.filesDir, CAPTURES_DIR))
     }
@@ -236,6 +256,7 @@ class AppContainer(context: Context) {
         const val PREF_SELECTION = "selection"
         const val PREF_VERBOSE_OPCOM_LOGGING = "verbose_opcom_logging"
         const val PREF_RECORD_SESSIONS = "record_sessions"
+        const val PREF_EXPERT_MODE = "expert_mode"
         const val CAPTURES_DIR = "captures"
         private const val OPCOM_HANDSHAKE_ATTEMPTS = 3
         private val OPCOM_HANDSHAKE_ATTEMPT_TIMEOUT = 1.seconds

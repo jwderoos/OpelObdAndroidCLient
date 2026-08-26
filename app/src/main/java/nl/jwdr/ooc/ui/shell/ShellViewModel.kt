@@ -14,6 +14,7 @@ import nl.jwdr.ooc.transport.ConnectionState
  */
 class ShellViewModel(
     private val diagnosticsManager: DiagnosticsManager,
+    val expertMode: StateFlow<Boolean>,
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = diagnosticsManager.connectionState

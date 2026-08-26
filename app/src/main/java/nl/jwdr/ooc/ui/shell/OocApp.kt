@@ -36,6 +36,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import nl.jwdr.ooc.R
 import nl.jwdr.ooc.ui.containerViewModel
+import nl.jwdr.ooc.ui.coding.CodingScreen
+import nl.jwdr.ooc.ui.coding.CodingViewModel
 import nl.jwdr.ooc.ui.ecus.EcuListScreen
 import nl.jwdr.ooc.ui.ecus.EcuListViewModel
 import nl.jwdr.ooc.ui.faultcodes.FaultCodesScreen
@@ -54,7 +56,7 @@ import nl.jwdr.ooc.transport.ConnectionState
 @Composable
 fun OocApp() {
     val navController = rememberNavController()
-    val shellViewModel = containerViewModel { ShellViewModel(it.diagnosticsManager) }
+    val shellViewModel = containerViewModel { ShellViewModel(it.diagnosticsManager, it.expertMode) }
     val connectionState by shellViewModel.connectionState.collectAsStateWithLifecycle()
 
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -96,8 +98,10 @@ fun OocApp() {
             }
             NavHost(navController = navController, startDestination = Route.Home) {
                 composable<Route.Home> {
+                    val expertMode by shellViewModel.expertMode.collectAsStateWithLifecycle()
                     HomeScreen(
                         connectionState = connectionState,
+                        expertMode = expertMode,
                         onToggleConnection = shellViewModel::toggleConnection,
                         onNavigate = { route -> navController.navigate(route) },
                     )
@@ -147,7 +151,14 @@ fun OocApp() {
                         onOpenEcuList = { navController.navigate(Route.EcuList()) },
                     )
                 }
-                composable<Route.Coding> { PlaceholderScreen(issueNumber = 18) }
+                composable<Route.Coding> {
+                    CodingScreen(
+                        viewModel = containerViewModel { container ->
+                            CodingViewModel(container.catalogRepository, container.diagnosticsManager, container.expertMode)
+                        },
+                        onOpenEcuList = { navController.navigate(Route.EcuList()) },
+                    )
+                }
                 composable<Route.Settings> { SettingsScreen() }
             }
         }

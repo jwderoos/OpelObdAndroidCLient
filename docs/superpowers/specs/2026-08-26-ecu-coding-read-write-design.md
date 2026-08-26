@@ -46,24 +46,28 @@ Reading it settles the read/write mechanics:
   anti-theft check that never touches the diagnostic bus, distinct from
   generic KWP2000 `SecurityAccess`.
 
-**Decision:** `writeCoding` calls `DiagnosticSession.unlock()` anyway before
-writing — harmless if the ECU doesn't require it (`AlreadyUnlocked` just
-passes through) — but the real safety gate for this feature is the in-app
-confirmation dialog plus the expert-mode toggle, not the wire-level unlock.
-CarPass itself (and any concrete seed/key algorithm) stays out of scope,
-per the no-vendor-data policy already applied to `SecurityAccess`.
+**Decision:** `writeCoding` skips `DiagnosticSession.unlock()` entirely for
+now. `unlock()` needs a `SeedKeyAlgorithm`, and none ships in this repo (no
+concrete algorithm is committed, per the no-vendor-data policy); #17 left
+"how a caller obtains one at runtime" unresolved and deferred it to #18.
+Guessing at a policy here — which unlock-step failures should block a write
+versus be treated as "this ECU doesn't need it" — has no real evidence
+behind it beyond the one capture available, which never sent a SID 0x27
+frame at all. Filed as issue #36 instead of guessing; the real safety gate
+for this feature is the in-app confirmation dialog plus the expert-mode
+toggle, not a wire-level unlock. CarPass itself stays out of scope, per the
+no-vendor-data policy already applied to `SecurityAccess`.
 
 ## `:core:protocol`
 
-No new code. Reused as-is: `ReadECUIdentification`,
-`WriteDataByLocalIdentifier`, `DiagnosticSession.unlock`, and the existing
-`ResponsePending` auto-retry.
-
-New test: `conformance/CodingConformanceTest.kt`, replaying
-`logs/2009-9-astra-h-body-uec-underhood-electrical-centre-00002.canlog`
-(skips without `/logs/`, same as `RecordedLogConformanceTest`). Asserts the
-read-all / write-all / re-read-all sequence for a subset of the recorded
-DID entries, including a `ResponsePending`-then-ack write.
+No new code and no new tests. `ReadECUIdentification` and
+`WriteDataByLocalIdentifier` are already unit-tested
+(`kwp2000/DataServicesTest.kt`), and `RecordedLogConformanceTest` already
+replays every `.canlog` in `/logs/` byte-for-byte, including
+`…uec…00002.canlog` — confirmed by running it: 17/17 recorded sessions pass
+today, so the coding read/write/`ResponsePending`-retry sequence in that
+capture already replays correctly through the existing protocol stack.
+A dedicated conformance test would only duplicate that coverage.
 
 ## `:core:catalog`
 
@@ -113,16 +117,23 @@ data class CodingEntryRead(val id: Int, val bytes: ByteArray)
 data class CodingReadResult(val entries: List<CodingEntryRead>)
 
 sealed interface CodingEntryOutcome {
-    data class Written(val id: Int, val verifiedBytes: ByteArray) : CodingEntryOutcome
-    data class NotAttempted(val id: Int) : CodingEntryOutcome
-    data class Failed(val id: Int, val reason: String) : CodingEntryOutcome
+    val id: Int
+    data class Written(override val id: Int, val verifiedBytes: ByteArray) : CodingEntryOutcome
+    data class NotAttempted(override val id: Int) : CodingEntryOutcome
+    data class Failed(override val id: Int, val reason: String) : CodingEntryOutcome
     data class VerificationMismatch(
-        val id: Int,
+        override val id: Int,
         val expected: ByteArray,
         val actual: ByteArray,
     ) : CodingEntryOutcome
 }
-data class CodingWriteResult(val outcomes: List<CodingEntryOutcome>)
+
+data class CodingWriteResult(
+    /** One outcome per edited id, in `table.didEntries` order. */
+    val outcomes: List<CodingEntryOutcome>,
+    /** Every entry in the table, re-read after the write attempt (edited or not) — lets the UI refresh the whole row list, not just the edited ones. */
+    val entries: List<CodingEntryRead>,
+)
 ```
 
 `readCoding`: `ReadECUIdentification` per `table.didEntries`, in order.
@@ -134,17 +145,14 @@ per-entry result, since the partial-state risk that motivates
 ids (the UI only ever produces edits from rows it rendered, so this is an
 `IllegalArgumentException` precondition, not a runtime outcome to display):
 
-1. `session.unlock(...)` once. On `SessionException.UnlockFailed`, return a
-   result with every edited id as `Failed` (nothing written) rather than
-   throwing past the caller — the UI needs to show this like any other
-   write failure, not crash.
-2. Walk `table.didEntries` in file order. For each id present in `edits`,
+1. Walk `table.didEntries` in file order. For each id present in `edits`,
    send `WriteDataByLocalIdentifier`. On the **first** failure (negative
    response or transport error), stop; every remaining edited id becomes
    `NotAttempted`. This is the core safety property: a half-applied coding
    record is the real risk here, not a single bad value, so nothing after
-   a failure is attempted silently.
-3. Re-read every entry in the table (edited or not) via
+   a failure is attempted silently. (No `unlock()` call — see "Decision"
+   above and issue #36.)
+2. Re-read every entry in the table (edited or not) via
    `ReadECUIdentification`. For edited ids, compare the re-read bytes to
    the intended write; a mismatch becomes `VerificationMismatch` instead of
    `Written` — a write that appears to ack but doesn't stick must not be
@@ -200,11 +208,10 @@ Default off. Exposed via a small `ExpertModeViewModel` (same shape as
 
 ## Testing
 
-- `:core:protocol`: `CodingConformanceTest` off the UEC 00002 log (skips
-  without `/logs/`).
+- `:core:protocol`: no new tests (see above).
 - `:app`: `FakeEcuTransport`-scripted tests for `readCoding`/`writeCoding`
-  — happy path; unlock failure (nothing written); first-entry-fails stops
-  the batch (remaining `NotAttempted`); a write acks but re-read disagrees
+  — happy path; first-entry-fails stops the batch (remaining
+  `NotAttempted`); a write acks but re-read disagrees
   (`VerificationMismatch`).
 - No `:core:catalog` test changes — the parser is unchanged.
 
@@ -215,3 +222,6 @@ Default off. Exposed via a small `ExpertModeViewModel` (same shape as
 - The CarPass algorithm, or any concrete `SeedKeyAlgorithm` implementation
   (proprietary; no-vendor-data policy, same reasoning as #17).
 - Solving the DID -> row mapping itself.
+- A runtime mechanism for supplying a `SeedKeyAlgorithm`, and the
+  unlock-step failure policy that would depend on it — tracked as issue
+  #36, not part of #18.
