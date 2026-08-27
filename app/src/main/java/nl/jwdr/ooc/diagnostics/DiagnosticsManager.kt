@@ -79,6 +79,8 @@ class DiagnosticsManager(
      * `.canlog` can be correlated with what the user did. No-op by default.
      */
     private val annotate: (String) -> Unit = {},
+    /** Injectable for tests; see [scanEcus]'s keep-alive scheduling. */
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     /** Top-level connection state for the UI chrome. */
     val connectionState: StateFlow<ConnectionState> = transport.state
@@ -143,36 +145,40 @@ class DiagnosticsManager(
      * emits one [EcuScanResult] per target, in order. Fails with a
      * [nl.jwdr.ooc.protocol.session.SessionException.TransportLost] when the
      * connection drops mid-scan.
+     *
+     * Keeps the (single-wire) CAN bus from sleeping between probes: SW-CAN
+     * powers down after ~30 s idle, after which the interface's bus-awake
+     * poll fails until a reconnect (issue #35). A low-rate all-nodes
+     * tester-present, exactly as the vendor keeps alive, prevents that — sent
+     * from right here in the scan loop, before a target that's had no
+     * successful activity in [BUS_KEEPALIVE_INTERVAL], rather than from a
+     * background loop racing [nl.jwdr.ooc.transport.opcom.OpComTransport]'s
+     * `commandMutex` against `configureBus()`'s own retries for a chance to
+     * reach the wire. That race could starve the keep-alive long enough for
+     * the bus to actually fall asleep — and once it did, the next ECU's
+     * re-handshake failed too and tore the whole link down (issue #44).
      */
     fun scanEcus(targets: List<EcuScanTarget>): Flow<EcuScanResult> = flow {
-        // Keep the (single-wire) CAN bus from sleeping between probes: SW-CAN
-        // powers down after ~30 s idle, after which the interface's bus-awake
-        // poll fails until a reconnect (issue #35). A low-rate all-nodes
-        // tester-present, exactly as the vendor keeps alive, prevents that.
-        coroutineScope {
-            val keepAlive = launch { keepBusAwakeLoop() }
-            try {
-                for (target in targets) {
-                    emit(EcuScanResult(target, probe(target)))
-                }
-            } finally {
-                keepAlive.cancel()
+        var lastActivityMs = clock()
+        for (target in targets) {
+            if (clock() - lastActivityMs >= BUS_KEEPALIVE_INTERVAL.inWholeMilliseconds) {
+                keepBusAwake()
+                lastActivityMs = clock()
             }
+            val status = probe(target)
+            // Unreachable means configureBus() itself never got a response
+            // (bus-not-awake or worse) — unlike Present/Absent, that's no
+            // proof anything actually reached the wire, so it must not reset
+            // the clock the keep-alive check above is racing against.
+            if (status != EcuScanStatus.Unreachable) lastActivityMs = clock()
+            emit(EcuScanResult(target, status))
         }
     }
 
-    /**
-     * Sends [ALL_NODES_TESTER_PRESENT] every [BUS_KEEPALIVE_INTERVAL] while a
-     * scan runs, so the bus stays awake between ECUs. Best-effort: it only
-     * fires while the transport is ready and never lets a failed keep-alive
-     * abort the scan.
-     */
-    private suspend fun keepBusAwakeLoop() {
-        while (true) {
-            delay(BUS_KEEPALIVE_INTERVAL)
-            if (connectionState.value == ConnectionState.Ready) {
-                runCatching { transport.send(ALL_NODES_TESTER_PRESENT) }
-            }
+    /** Sends [ALL_NODES_TESTER_PRESENT] once, best-effort. */
+    private suspend fun keepBusAwake() {
+        if (connectionState.value == ConnectionState.Ready) {
+            runCatching { transport.send(ALL_NODES_TESTER_PRESENT) }
         }
     }
 

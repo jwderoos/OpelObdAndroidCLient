@@ -1,5 +1,8 @@
 package nl.jwdr.ooc.diagnostics
 
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import nl.jwdr.ooc.transport.CanFrame
@@ -108,14 +111,18 @@ class EcuScanTest {
     /**
      * A [FakeEcuTransport] that also answers [BusSelectable], failing
      * [configureBus] for any request id in [asleepRequestIds] so a scan's
-     * bus-not-awake handling can be exercised (issue #33).
+     * bus-not-awake handling can be exercised (issue #33). [configureDelay]
+     * simulates the real retry cost a failing `configureBus()` pays before
+     * giving up (issue #44's `pollBusAwake`/handshake retries).
      */
     private class BusSelectableFake(
         private val inner: FakeEcuTransport,
         private val asleepRequestIds: Set<Int>,
+        private val configureDelay: Duration = Duration.ZERO,
     ) : ObdTransport by inner, BusSelectable {
         override suspend fun configureBus(bus: OpComBus, requestId: Int, secondaryId: Int, responseId: Int) {
             if (requestId in asleepRequestIds) {
+                delay(configureDelay)
                 throw OpComBusNotAwakeException("bus not awake for 0x${requestId.toString(16)}")
             }
         }
@@ -142,27 +149,61 @@ class EcuScanTest {
             results,
         )
     }
+    private val testerPresent = CanFrame(0x101, bytes(0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00))
+
     @Test
-    fun `a scan keeps the bus awake with periodic all-nodes tester-present`() = runTest {
+    fun `a keep-alive fires before the next probe once accumulated unreachable time crosses the interval`() = runTest {
+        // Two consecutive bus-not-awake ECUs, each paying the real ~1.2s retry
+        // cost configureBus() incurs before giving up (issue #44): together
+        // they cross the 2s keep-alive interval with no successful traffic in
+        // between, so the next probe must be preceded by a keep-alive.
+        val inner = FakeEcuTransport(backgroundScope)
+        val next = EcuScanTarget("ABS", requestId = 0x241, responseId = 0x641, bus = CanBus.HSCAN)
+        inner.onFrame(probeRequest(0x241)).respondWith(frame(0x641, 0x02, 0x58, 0x00))
+        val asleep1 = EcuScanTarget("REC", requestId = 0x251, responseId = 0x651, secondaryId = 0x551, bus = CanBus.SWCAN)
+        val asleep2 = EcuScanTarget("UEC", requestId = 0x252, responseId = 0x652, secondaryId = 0x552, bus = CanBus.SWCAN)
+        val transport = BusSelectableFake(
+            inner,
+            asleepRequestIds = setOf(0x251, 0x252),
+            configureDelay = 1200.milliseconds,
+        )
+        transport.connect()
+        val manager = DiagnosticsManager(transport, clock = { testScheduler.currentTime })
+
+        val results = manager.scanEcus(listOf(asleep1, asleep2, next)).toList()
+
+        assertEquals(
+            listOf(
+                EcuScanResult(asleep1, EcuScanStatus.Unreachable),
+                EcuScanResult(asleep2, EcuScanStatus.Unreachable),
+                EcuScanResult(next, EcuScanStatus.Present(dtcCount = 0)),
+            ),
+            results,
+        )
+        assertEquals(
+            "expected exactly one keep-alive once the accumulated silence crossed the interval",
+            1,
+            inner.sentFrames.count { it == testerPresent },
+        )
+    }
+
+    @Test
+    fun `no keep-alive is needed when probes already keep the bus continuously active`() = runTest {
+        // Five absent ECUs, each consuming the full 500ms scan timeout: 2.5s
+        // of scanning overall, but every individual gap is well under the
+        // keep-alive interval, and each probe's own (unanswered) request
+        // already put a frame on the bus — a dedicated ping is redundant.
         val transport = FakeEcuTransport(backgroundScope)
         transport.connect()
-        val manager = DiagnosticsManager(transport)
-        // Ten absent ECUs: each probe times out after the scan timeout, so the
-        // scan spans several seconds of virtual time — long enough for the
-        // keep-alive to fire between probes (issue #35).
-        val targets = List(10) { i ->
-            EcuScanTarget("e$i", requestId = 0x700 + i, responseId = 0x708 + i, bus = CanBus.SWCAN)
-        }
+        val manager = DiagnosticsManager(transport, clock = { testScheduler.currentTime })
+        val targets = List(5) { i -> EcuScanTarget("e$i", requestId = 0x700 + i, responseId = 0x708 + i) }
 
         manager.scanEcus(targets).toList()
 
-        val testerPresent = CanFrame(
-            0x101,
-            bytes(0xFE, 0x01, 0x3E, 0x00, 0x00, 0x00, 0x00, 0x00),
-        )
-        assertTrue(
-            "expected at least one keep-alive tester-present during the scan",
-            transport.sentFrames.any { it == testerPresent },
+        assertEquals(
+            "consecutive probes already keep the bus active; no separate keep-alive should be needed",
+            0,
+            transport.sentFrames.count { it == testerPresent },
         )
     }
 }
