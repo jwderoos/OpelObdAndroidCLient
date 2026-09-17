@@ -9,9 +9,16 @@ import org.json.JSONObject
  * generated from the vendor tool's per-ECU handlers) into [LiveDecodeRule]s
  * keyed by catalog key then catalog row number.
  *
- * The asset lists only ECUs whose handler rows aligned 1:1 with the catalog;
- * an unlisted ECU (or row) simply has no rule, and live data falls back to
- * raw/no-data rather than a guess.
+ * Each rule's catalog row is read straight off the handler's assignment target
+ * (the vendor's row table is a fixed-stride array, so every assign names its
+ * row), not inferred from row counts — see `docs/live-decode-ruleset.md` for
+ * provenance and how the asset is regenerated.
+ *
+ * Coverage is per row, not per ECU: a catalog is usually *partially* covered,
+ * because rows whose decode doesn't fit this schema (multi-byte, masked or
+ * signed numerics, lookup tables) are deliberately withheld rather than
+ * guessed — issue #47 tracks the schema extension that admits them. An
+ * unlisted ECU or row simply has no rule and reads as no-data.
  */
 class LiveDecodeRuleStore(open: () -> InputStream) {
 
@@ -43,7 +50,7 @@ class LiveDecodeRuleStore(open: () -> InputStream) {
             return when (val t = getString("t")) {
                 "num" -> LiveDecodeRule.Numeric(dpid, byte, getDouble("factor"), optDouble("offset", 0.0))
                 "state" -> LiveDecodeRule.StateByte(dpid, byte)
-                "menum" -> LiveDecodeRule.MaskedState(dpid, byte, getInt("mask"))
+                "mstate" -> LiveDecodeRule.MaskedState(dpid, byte, getInt("mask"))
                 "flag" -> LiveDecodeRule.Flag(dpid, byte, getInt("mask"), getInt("eq"))
                 "raw" -> LiveDecodeRule.RawByte(dpid, byte)
                 else -> error("unknown decode rule type '$t'")

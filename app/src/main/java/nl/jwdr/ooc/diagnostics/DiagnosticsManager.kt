@@ -374,10 +374,15 @@ class DiagnosticsManager(
      * one GMLAN readDataByPacketIdentifier request schedules the block's
      * MEASDATA verbatim (scheduling-rate byte + DPID ids, as recorded
      * sessions show — issue #25), the values arrive as UUDT broadcasts on
-     * [EcuScanTarget.secondaryId] at [DisplayTagBindings.ROWS_PER_DPID] data
-     * bytes per DPID, and each reading decodes the latest broadcast of every
-     * DPID (rows of DPIDs not yet seen read as no-data). One session spans
-     * the whole poll; when the collector cancels, `AA 00` stops the schedule.
+     * [EcuScanTarget.secondaryId], and each reading decodes the latest
+     * broadcast of every DPID (rows of DPIDs not yet seen read as no-data).
+     *
+     * With [decodeRules] each row reads the byte its own DPID actually
+     * carries, at the vendor's scale/bit rules; rows are *not* laid out
+     * contiguously per DPID, so the byte offset is arbitrary per ECU and only
+     * the ruleset knows it. Without a ruleset the positional heuristic still
+     * applies (issue #49 tracks retiring it). One session spans the whole
+     * poll; when the collector cancels, `AA 00` stops the schedule.
      */
     fun pollMeasuringBlock(
         target: EcuScanTarget,
