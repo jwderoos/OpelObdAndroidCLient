@@ -16,6 +16,7 @@ import nl.jwdr.ooc.catalogstore.EcuEntity
 import nl.jwdr.ooc.catalogstore.FakeCatalogDao
 import nl.jwdr.ooc.catalogstore.VehicleRef
 import nl.jwdr.ooc.diagnostics.DiagnosticsManager
+import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
 import nl.jwdr.ooc.diagnostics.LiveDecodeRuleStore
 import nl.jwdr.ooc.transport.CanFrame
 import nl.jwdr.ooc.transport.FakeEcuTransport
@@ -54,11 +55,23 @@ class LiveDataViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(transport: ObdTransport) = LiveDataViewModel(
+    /**
+     * Decode rules for the fixture block: row 1 reads DPID 4's first byte as a
+     * number, row 2 its second byte as a state index. Without rules nothing
+     * decodes at all (issue #49), so every polling test needs them.
+     */
+    private val engineRules = """
+        {"ENG":[
+          {"row":1,"dpid":4,"t":"num","byte":0,"factor":1.0},
+          {"row":2,"dpid":4,"t":"state","byte":1}
+        ]}
+    """.trimIndent()
+
+    private fun viewModel(transport: ObdTransport, rulesJson: String = engineRules) = LiveDataViewModel(
         repository,
         DiagnosticsManager(transport),
         csvStore,
-        LiveDecodeRuleStore { "{}".byteInputStream() },
+        LiveDecodeRuleStore { rulesJson.byteInputStream() },
         clock = { nowMs },
     )
 
@@ -295,6 +308,32 @@ class LiveDataViewModelTest {
 
         val second = viewModel.state.value as LiveDataUiState.Live
         assertEquals("81", second.rows[0].display)
+
+        // Stop the endless poll so runTest's cleanup can reach idle.
+        viewModel.changeBlock()
+        dispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `an ECU with no decode rules flags the gap instead of guessing values`() = runTest(dispatcher) {
+        storeEngineWithBlocks()
+        val transport = FakeEcuTransport(backgroundScope)
+        transport.onFrame(scheduleRequest).respondWith(engineBroadcast(0x50))
+        val viewModel = viewModel(transport, rulesJson = "{}")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("Engine")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.selectBlock(1)
+        dispatcher.scheduler.advanceTimeBy(500)
+        dispatcher.scheduler.runCurrent()
+
+        val state = viewModel.state.value as LiveDataUiState.Live
+        assertTrue("the screen must explain why every row is blank", state.decodeRulesMissing)
+        assertTrue(
+            "no row may show a positional guess",
+            state.rows.isNotEmpty() && state.rows.all { it.display == MeasuringBlockDecoder.NO_DATA },
+        )
 
         // Stop the endless poll so runTest's cleanup can reach idle.
         viewModel.changeBlock()

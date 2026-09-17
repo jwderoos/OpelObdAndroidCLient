@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import nl.jwdr.ooc.catalog.DataRow
+import nl.jwdr.ooc.catalog.LiveDecodeRule
 import nl.jwdr.ooc.catalog.MeasuringBlock
 import nl.jwdr.ooc.catalog.MeasuringBlockDecoder
 import nl.jwdr.ooc.transport.CanFrame
@@ -66,6 +67,10 @@ class LiveDataTest {
         DataRow(label = "Engine Speed", unit = "rpm"),
     )
 
+    /** Row 1 reads DPID 1's first byte; row 8 reads DPID 2's. */
+    private val firstByteOfDpid1 = LiveDecodeRule.Numeric(dpid = 1, byte = 0, factor = 1.0)
+    private val firstByteOfDpid2 = LiveDecodeRule.Numeric(dpid = 2, byte = 0, factor = 1.0)
+
     @Test
     fun `with a decode ruleset each row reads its own DPID byte, scaled`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
@@ -93,7 +98,7 @@ class LiveDataTest {
     }
 
     @Test
-    fun `a reading decodes the scheduled DPID broadcasts at seven bytes per DPID`() = runTest {
+    fun `an ECU with no decode rules reads as no-data, never as a positional guess`() = runTest {
         val transport = FakeEcuTransport(backgroundScope)
         transport.onFrame(scheduleRequest).respondWith(
             dpidFrame(0x01, 0x5A, 0x01, 0x13, 0x14, 0x15, 0x16, 0x17),
@@ -104,13 +109,12 @@ class LiveDataTest {
 
         val reading = manager.pollMeasuringBlock(engine, block, rows, 100.milliseconds).first()
 
+        // The payload bytes are there, but no rule says which row owns which
+        // byte, so none of them may be shown (issue #49). The old positional
+        // heuristic reported 0x5A as "Coolant Temperature = 90".
         assertEquals(9, reading.rows.size)
-        assertEquals(0x5A, reading.rows[0].raw)
-        assertEquals("90", reading.rows[0].display)
-        assertEquals("Active", reading.rows[1].display)
-        assertEquals(0x17, reading.rows[6].raw)
-        assertEquals(0x0E, reading.rows[7].raw)
-        assertEquals(0x20, reading.rows[8].raw)
+        assertTrue(reading.rows.all { it.raw == null })
+        assertTrue(reading.rows.all { it.display == MeasuringBlockDecoder.NO_DATA })
     }
 
     @Test
@@ -124,9 +128,9 @@ class LiveDataTest {
         transport.connect()
         val manager = DiagnosticsManager(transport)
 
-        val readings = manager.pollMeasuringBlock(engine, block, rows, 100.milliseconds)
-            .take(2)
-            .toList()
+        val readings = manager.pollMeasuringBlock(
+            engine, block, rows, 100.milliseconds, mapOf(1 to firstByteOfDpid1),
+        ).take(2).toList()
 
         assertEquals(listOf(0x50, 0x51), readings.map { it.rows[0].raw })
     }
@@ -140,9 +144,13 @@ class LiveDataTest {
         transport.connect()
         val manager = DiagnosticsManager(transport)
 
-        val reading = manager.pollMeasuringBlock(engine, block, rows, 100.milliseconds).first()
+        val reading = manager.pollMeasuringBlock(
+            engine, block, rows, 100.milliseconds,
+            mapOf(1 to firstByteOfDpid1, 8 to firstByteOfDpid2),
+        ).first()
 
         assertEquals(0x5A, reading.rows[0].raw)
+        // Row 8's rule points at DPID 2, which never broadcast.
         assertNull(reading.rows[7].raw)
         assertEquals(MeasuringBlockDecoder.NO_DATA, reading.rows[7].display)
     }

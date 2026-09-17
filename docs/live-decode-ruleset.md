@@ -73,6 +73,13 @@ Withholding is deliberate: a raw byte shown next to a unit reads as a
 measurement, and a wrong measurement is worse than a dash in a diagnostics
 tool.
 
+For the same reason there is no fallback decoder. An ECU with no rules at all
+shows every row as a dash, and the Live Data screen says so in one line, so the
+user can tell a coverage gap from a broken connection. The modules that land
+there are the ones the generator withholds precisely because no vendor routine
+decodes them under that id, so any positional guess could only be right by
+accident.
+
 ## Verification
 
 The generator's alignment check proves *which row* a byte feeds. It does not

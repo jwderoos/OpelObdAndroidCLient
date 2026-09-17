@@ -24,7 +24,6 @@ import kotlinx.coroutines.flow.update
 import nl.jwdr.ooc.catalog.BlockReading
 import nl.jwdr.ooc.catalog.CodingTable
 import nl.jwdr.ooc.catalog.DataRow
-import nl.jwdr.ooc.catalog.DisplayTagBindings
 import nl.jwdr.ooc.catalog.MeasuringBlock
 import nl.jwdr.ooc.catalog.CommandRecord
 import nl.jwdr.ooc.catalog.LiveDecodeRule
@@ -506,35 +505,32 @@ class DiagnosticsManager(
     }
 
     /**
-     * Decodes one live reading. With a per-ECU [decodeRules] set (issue: GMLAN
-     * DPID decode), each row reads its own DPID/byte with the vendor's real
-     * scale/bit rules; without one, falls back to the positional heuristic so
-     * uncovered ECUs still show something (bytes concatenated at seven per DPID).
+     * Decodes one live reading: each row reads its own DPID and byte with the
+     * vendor's real scale/bit rules from [decodeRules].
+     *
+     * There is deliberately no fallback for an ECU with no rules (issue #49).
+     * A GMLAN DPID payload's byte offsets are arbitrary per ECU, so the old
+     * positional guess (bytes concatenated at seven per DPID) could only be
+     * right by accident — and the ECUs that still reach here are precisely the
+     * ones the ruleset withholds *because* no handler decodes them under that
+     * id. Every row reads as no-data instead: a raw byte beside a unit label
+     * reads as a measurement, and a wrong measurement is worse than a dash.
      */
     private fun decodeReading(
         block: MeasuringBlock,
         rows: List<DataRow>,
         latest: Map<Int, ByteArray>,
         decodeRules: Map<Int, LiveDecodeRule>,
-    ): BlockReading {
-        if (decodeRules.isNotEmpty()) {
-            val readings = LiveMeasuringBlockDecoder.decode(
-                firstRowNumber = block.enabledRows.first,
-                rows = rows,
-                dpidBytes = latest,
-                rules = decodeRules,
-            )
-            return BlockReading(block, readings, ByteArray(0))
-        }
-        val dpids = block.measData.drop(1)
-        val record = dpids.flatMap { dpid ->
-            val data = latest[dpid]
-            List(DisplayTagBindings.ROWS_PER_DPID) { index ->
-                data?.getOrNull(index)?.toInt()?.and(0xFF)
-            }
-        }
-        return MeasuringBlockDecoder.decode(block, rows, record)
-    }
+    ): BlockReading = BlockReading(
+        block,
+        LiveMeasuringBlockDecoder.decode(
+            firstRowNumber = block.enabledRows.first,
+            rows = rows,
+            dpidBytes = latest,
+            rules = decodeRules,
+        ),
+        ByteArray(0),
+    )
 
     /**
      * Sends the functional mode 01 PID 00 probe on 0x7DF and returns a target

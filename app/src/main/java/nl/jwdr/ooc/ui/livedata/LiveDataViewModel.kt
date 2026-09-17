@@ -77,6 +77,12 @@ sealed interface LiveDataUiState {
         val logging: Boolean = false,
         /** Path of the last finished CSV log, for the share action. */
         val savedCsvPath: String? = null,
+        /**
+         * This ECU has no decode rules, so every row reads as no-data rather
+         * than as a positional guess (issue #49). Tells the user it's a
+         * coverage gap, not a broken connection.
+         */
+        val decodeRulesMissing: Boolean = false,
     ) : LiveDataUiState
 }
 
@@ -191,6 +197,7 @@ class LiveDataViewModel(
         val rows = catalog.rowsFor(block)
         pollJob?.cancel()
         csvLines = null
+        val decodeRules = definition.catalogKey?.let { ruleStore.rulesFor(it) } ?: emptyMap()
         pollJob = viewModelScope.launch {
             _state.value = LiveDataUiState.Live(
                 ecuName = definition.name,
@@ -198,6 +205,9 @@ class LiveDataViewModel(
                 rows = emptyList(),
                 polling = true,
                 error = null,
+                // Flagged up front, not after the first reading: the rows would
+                // otherwise just sit blank with no explanation.
+                decodeRulesMissing = decodeRules.isEmpty(),
             )
             try {
                 if (diagnosticsManager.connectionState.value !is ConnectionState.Ready) {
@@ -210,7 +220,6 @@ class LiveDataViewModel(
                     secondaryId = address.secondaryId.takeIf { it != 0 },
                     bus = address.bus,
                 )
-                val decodeRules = definition.catalogKey?.let { ruleStore.rulesFor(it) } ?: emptyMap()
                 diagnosticsManager.pollMeasuringBlock(target, block, rows, POLL_INTERVAL, decodeRules)
                     .collect { reading -> onReading(definition.name, reading) }
             } catch (e: CancellationException) {

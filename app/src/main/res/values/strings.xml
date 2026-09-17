@@ -65,6 +65,7 @@
     <string name="live_data_pick_block">Choose a measuring block</string>
     <string name="live_data_no_blocks">The catalog lists no measuring blocks for this control unit.</string>
     <string name="live_data_waiting">Waiting for data…</string>
+    <string name="live_data_no_decode_rules">No decode rules for this control unit yet, so its values cannot be read. This is a coverage gap, not a connection problem.</string>
     <string name="live_data_raw_note">Raw values — the catalog does not define scaling.</string>
     <string name="action_change_block">Change block</string>
     <string name="action_start_logging">Record CSV</string>

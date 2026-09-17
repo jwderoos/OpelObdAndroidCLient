@@ -27,6 +27,14 @@ data class BlockReading(
  * The catalog format documents no byte layout or scaling, so this uses the only
  * mapping its state rows imply: one byte per enabled row, in table order. Rows
  * without a byte read as no-data; surplus bytes are surfaced as unmapped.
+ *
+ * **Not for GMLAN live data.** A DPID broadcast's byte offsets are arbitrary
+ * per ECU, so this positional mapping is wrong there by construction; that path
+ * uses [LiveMeasuringBlockDecoder] with a per-ECU ruleset and shows no-data
+ * when it has none, rather than a guess (issue #49). [decode] survives for a
+ * flat single-response record, where one byte per row remains the plausible
+ * reading — the KWP2000 local-identifier path a K-line transport would need
+ * (issue #42). [displayFor] and [NO_DATA] are used on their own elsewhere.
  */
 object MeasuringBlockDecoder {
 

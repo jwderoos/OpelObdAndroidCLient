@@ -260,6 +260,16 @@ private fun LiveBlock(
             )
         }
 
+        // Every row will read as a dash; say why, so it doesn't look like the
+        // connection failed (issue #49).
+        if (state.decodeRulesMissing) {
+            Text(
+                text = stringResource(R.string.live_data_no_decode_rules),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         if (state.polling && state.rows.isEmpty()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
