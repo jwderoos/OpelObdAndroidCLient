@@ -3,7 +3,11 @@ package nl.jwdr.ooc.catalog
 /** One decoded value row of a live measuring-block reading. */
 data class RowReading(
     val row: DataRow,
-    /** Unsigned raw byte value, or null when the record had no byte for this row. */
+    /**
+     * The integer field this row read, before its unit scaling: an unsigned
+     * byte for most rows, or a decoded multi-byte/masked/signed field where the
+     * ruleset defines one. Null when the record carried no bytes for this row.
+     */
     val raw: Int?,
     /** Display text: state label, decimal value, or a placeholder when absent. */
     val display: String,

@@ -23,18 +23,29 @@ what keeps this repo inside its no-vendor-data policy.
 
 | rule type | meaning |
 |---|---|
-| `num` | value = `byte × factor + offset` |
+| `num` | value = `field × factor + offset` |
 | `state` | the raw byte indexes the row's state list |
 | `mstate` | `(byte & mask) >> tz(mask)` indexes the row's state list |
+| `table` | `(byte & mask) >> tz(mask)` looks up `map` to get a state index |
 | `flag` | two-state: true when `(byte & mask) == eq` |
 | `raw` | show the raw byte; no decode claimed |
+
+A `num` rule's field is one unsigned byte unless it says otherwise. It may
+instead span `width` bytes (2 or 3) starting at `byte`, ordered by `endian`,
+and may be narrowed by `mask`, then `shift`, then `signed`. That order is the
+one the vendor's own routines apply, and `signed` is a two's complement over
+eight bits because the vendor signs only single bytes. A field that would run
+past the end of its DPID payload reads as no-data rather than as a partial
+value.
 
 ## Provenance
 
 Generated in the separate `OpelObdToolExploration` project, which decompiles
 the vendor binary and is kept private for that reason. Current asset comes
-from its commits `73019b6` and `8dd4028` (2026-09-17): **7610 rules across
-130 catalogs**.
+from its commits `73019b6` and `8dd4028` (2026-09-17): **9141 rules across
+133 catalogs**, merged from the two files that project emits — its
+`live_decode_rules.json` plus the `live_decode_rules_extended.json` rows that
+need the wider `num` fields and `table` lookups described above.
 
 Rows are bound to their catalog row *explicitly*, not by counting. The
 vendor's row table is a fixed-stride array, so once the decompiler is told the
@@ -52,12 +63,11 @@ here; nothing in this repo transforms it.
 ## Coverage is per row, not per ECU
 
 Most covered catalogs are *partially* covered. A row is withheld rather than
-guessed when its decode does not fit the schema above — chiefly multi-byte,
-masked or signed numerics and non-identity lookup tables. Those rows are
-emitted separately by the generator and land here once the app's rule schema
-grows to admit them (issue #47). 62 catalogs are withheld whole, most because
-they are K-line modules that never reach this code path, or because the only
-handler under that numeric ID belongs to a different variant.
+guessed when its decode still does not fit the schema above — what remains is
+mostly two payload bytes combined arithmetically, range tests on words, and
+values the decompiler could not type. 59 catalogs are withheld whole, most
+because they are K-line modules that never reach this code path, or because
+the only handler under that numeric ID belongs to a different variant.
 
 Withholding is deliberate: a raw byte shown next to a unit reads as a
 measurement, and a wrong measurement is worse than a dash in a diagnostics

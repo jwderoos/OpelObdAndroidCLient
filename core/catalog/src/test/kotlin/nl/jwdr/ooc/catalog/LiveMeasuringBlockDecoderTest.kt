@@ -133,4 +133,119 @@ class LiveMeasuringBlockDecoderTest {
         ).single()
         assertEquals("3", r.display)
     }
+
+    // ---- extended rule schema (issue #47) ----
+
+    /** DPID 16: a payload with room for 16- and 24-bit fields. */
+    private val wideBytes = mapOf(
+        16 to bytes(0x01, 0x02, 0x03, 0x04, 0x05, 0xF0, 0x9C),
+    )
+
+    @Test
+    fun `a big-endian 16-bit field combines both bytes high-first`() {
+        val row = DataRow("Engine Speed", unit = "rpm")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 0, factor = 0.25, width = 2)),
+        ).single()
+        // 0x0102 = 258; 258 * 0.25 = 64.5
+        assertEquals(258, r.raw)
+        assertEquals("64.5", r.display)
+    }
+
+    @Test
+    fun `a little-endian 16-bit field combines both bytes low-first`() {
+        val row = DataRow("Intake Temp", unit = "C")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(
+                1 to LiveDecodeRule.Numeric(
+                    dpid = 16, byte = 0, factor = 1.0, width = 2, bigEndian = false,
+                ),
+            ),
+        ).single()
+        // 0x0201 = 513, not 258 — the byte order is the whole point.
+        assertEquals(513, r.raw)
+        assertEquals("513", r.display)
+    }
+
+    @Test
+    fun `a 24-bit field combines three bytes big-endian`() {
+        val row = DataRow("Odometer", unit = "km")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 1, factor = 1.0, width = 3)),
+        ).single()
+        // 0x020304 = 131844
+        assertEquals(131844, r.raw)
+    }
+
+    @Test
+    fun `a signed byte above 0x7F decodes as a negative value`() {
+        val row = DataRow("Fuel Trim", unit = "%")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 5, factor = 0.5, signed = true)),
+        ).single()
+        // 0xF0 = 240 unsigned, -16 as two's complement; -16 * 0.5 = -8
+        assertEquals(-16, r.raw)
+        assertEquals("-8", r.display)
+    }
+
+    @Test
+    fun `a mask narrows a numeric field before scaling`() {
+        val row = DataRow("Load", unit = "%")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 6, factor = 1.0, mask = 0x7F)),
+        ).single()
+        // 0x9C & 0x7F = 0x1C = 28 — the top bit belongs to another row.
+        assertEquals(28, r.raw)
+    }
+
+    @Test
+    fun `a shift moves a high nibble down before scaling`() {
+        val row = DataRow("Gear")
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 6, factor = 1.0, shift = 4)),
+        ).single()
+        // 0x9C ushr 4 = 9
+        assertEquals(9, r.raw)
+    }
+
+    @Test
+    fun `a table rule maps the masked field through to a state label`() {
+        val row = DataRow("Gear Position", states = listOf("P", "R", "N", "D", "M", "Invalid"))
+        // byte6 = 0x9C; (0x9C & 0x1F) = 0x1C = 28 -> map 28 -> state 4 = "M".
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Table(dpid = 16, byte = 6, mask = 0x1F, map = mapOf(28 to 4))),
+        ).single()
+        assertEquals("M", r.display)
+    }
+
+    @Test
+    fun `a table rule shows the raw index when the map has no entry for it`() {
+        val row = DataRow("Gear Position", states = listOf("P", "R", "N"))
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), wideBytes,
+            mapOf(1 to LiveDecodeRule.Table(dpid = 16, byte = 6, mask = 0x1F, map = mapOf(0 to 1))),
+        ).single()
+        // Honest raw index beats guessing a label for an unmapped state.
+        assertEquals("28", r.display)
+    }
+
+    @Test
+    fun `a multi-byte field running past the payload reads as no-data`() {
+        val row = DataRow("Odometer", unit = "km")
+        val short = mapOf(16 to bytes(0x01, 0x02))
+        val r = LiveMeasuringBlockDecoder.decode(
+            1, listOf(row), short,
+            mapOf(1 to LiveDecodeRule.Numeric(dpid = 16, byte = 1, factor = 1.0, width = 3)),
+        ).single()
+        // A partial read would be a confidently wrong number.
+        assertEquals(MeasuringBlockDecoder.NO_DATA, r.display)
+        assertEquals(null, r.raw)
+    }
 }

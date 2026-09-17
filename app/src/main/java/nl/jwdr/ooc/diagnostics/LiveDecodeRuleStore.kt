@@ -15,10 +15,9 @@ import org.json.JSONObject
  * provenance and how the asset is regenerated.
  *
  * Coverage is per row, not per ECU: a catalog is usually *partially* covered,
- * because rows whose decode doesn't fit this schema (multi-byte, masked or
- * signed numerics, lookup tables) are deliberately withheld rather than
- * guessed — issue #47 tracks the schema extension that admits them. An
- * unlisted ECU or row simply has no rule and reads as no-data.
+ * because a row whose decode still can't be expressed here is deliberately
+ * withheld rather than guessed. An unlisted ECU or row simply has no rule and
+ * reads as no-data.
  */
 class LiveDecodeRuleStore(open: () -> InputStream) {
 
@@ -48,13 +47,34 @@ class LiveDecodeRuleStore(open: () -> InputStream) {
             val dpid = getInt("dpid")
             val byte = getInt("byte")
             return when (val t = getString("t")) {
-                "num" -> LiveDecodeRule.Numeric(dpid, byte, getDouble("factor"), optDouble("offset", 0.0))
+                "num" -> LiveDecodeRule.Numeric(
+                    dpid = dpid,
+                    byte = byte,
+                    factor = getDouble("factor"),
+                    offset = optDouble("offset", 0.0),
+                    width = optInt("width", 1),
+                    // Only meaningful with a width; "be" is the generator's default.
+                    bigEndian = optString("endian", "be") != "le",
+                    mask = if (has("mask")) getInt("mask") else null,
+                    shift = optInt("shift", 0),
+                    signed = optBoolean("signed", false),
+                )
                 "state" -> LiveDecodeRule.StateByte(dpid, byte)
                 "mstate" -> LiveDecodeRule.MaskedState(dpid, byte, getInt("mask"))
                 "flag" -> LiveDecodeRule.Flag(dpid, byte, getInt("mask"), getInt("eq"))
                 "raw" -> LiveDecodeRule.RawByte(dpid, byte)
+                "table" -> LiveDecodeRule.Table(dpid, byte, getInt("mask"), stateMap(getJSONObject("map")))
                 else -> error("unknown decode rule type '$t'")
             }
+        }
+
+        /** A `table` rule's `{"<field value>": <state index>}` object. */
+        fun stateMap(json: JSONObject): Map<Int, Int> {
+            val map = mutableMapOf<Int, Int>()
+            for (key in json.keys()) {
+                map[key.toInt()] = json.getInt(key)
+            }
+            return map
         }
     }
 }
