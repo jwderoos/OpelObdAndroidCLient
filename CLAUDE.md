@@ -18,7 +18,18 @@ Requires JDK 17. The `:core:*` modules are plain Kotlin/JVM (no Android SDK need
 ./gradlew :core:protocol:test --tests "nl.jwdr.ooc.protocol.isotp.IsoTpChannelTest"   # single test class
 ./gradlew :app:testDebugUnitTest         # app JVM unit tests
 ./gradlew :app:assembleDebug             # build the APK
+
+tools/install-debug.sh                   # build + install on a device, verified by SHA-256
+tools/install-debug.sh --no-build --launch
 ```
+
+`tools/install-debug.sh` is the preferred way to get a build onto a phone: it
+prints the SHA-256 of the APK that was on the device *before* the install and
+re-reads it *after*, failing if the device is not running the APK that was just
+built. Gradle's `UP-TO-DATE` and adb's `Success` say nothing about what the
+device was running, and `versionName` is static in this project, so the hash is
+the only reliable signal. It passes `--user 0` (Secure Folder rejects shell
+installs) and works over wireless adb.
 
 Tests that replay recorded real-vehicle logs (e.g. `RecordedLogConformanceTest`) skip automatically when `/logs/` is absent — that is expected on clean checkouts and in CI.
 
