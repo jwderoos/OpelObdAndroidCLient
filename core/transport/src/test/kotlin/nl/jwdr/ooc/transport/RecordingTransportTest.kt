@@ -87,6 +87,49 @@ class RecordingTransportTest {
     }
 
     @Test
+    fun `reconnecting without disconnecting first records each frame once`() = runTest {
+        val fake = FakeEcuTransport(backgroundScope)
+        fake.onFrame(request).respondWith(response)
+        val out = StringBuilder()
+        val recorder = RecordingTransport(fake, { AppendableCanLogSink(out) }, backgroundScope, clock = StepClock())
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) { recorder.incomingFrames.toList(mutableListOf()) }
+
+        // Screens call connect() on demand, and the OP-COM transport can drop
+        // the link internally, so a second connect() with no disconnect() in
+        // between is a normal path, not misuse (issue #45).
+        recorder.connect()
+        recorder.connect()
+        recorder.connect()
+        recorder.send(request)
+        testScheduler.runCurrent()
+        recorder.disconnect()
+        job.cancel()
+
+        val rx = CanLog.parse(out.toString()).frames.filter { it.direction == Direction.RX }
+        assertEquals("each received frame must be logged exactly once", 1, rx.size)
+    }
+
+    @Test
+    fun `reconnecting without disconnecting first closes the previous sink`() = runTest {
+        val fake = FakeEcuTransport(backgroundScope)
+        var closed = 0
+        val recorder = RecordingTransport(fake, {
+            object : CanLogSink by AppendableCanLogSink(StringBuilder()) {
+                override fun close() { closed++ }
+            }
+        }, backgroundScope)
+
+        recorder.connect()
+        recorder.connect()
+
+        // The first session's sink would otherwise be dropped unclosed, so its
+        // file handle leaks and its tail is never flushed.
+        assertEquals(1, closed)
+        recorder.disconnect()
+        assertEquals(2, closed)
+    }
+
+    @Test
     fun `records nothing when the sink factory returns null`() = runTest {
         val fake = FakeEcuTransport(backgroundScope)
         fake.onFrame(request).respondWith(response)

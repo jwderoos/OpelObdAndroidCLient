@@ -3,6 +3,7 @@ package nl.jwdr.ooc.transport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -14,7 +15,8 @@ import kotlinx.coroutines.launch
  *
  * [openSink] is consulted on every [connect]; returning `null` disables
  * recording for that session (the app reads its debug toggle there). The sink
- * is closed on [disconnect]. Timestamps are milliseconds since [connect].
+ * is closed on [disconnect], and also by a [connect] that follows one without
+ * a [disconnect] in between. Timestamps are milliseconds since [connect].
  *
  * Received frames are recorded by a private collector in [scope], not by
  * decorating [incomingFrames]: the protocol stack has several independent
@@ -37,6 +39,15 @@ class RecordingTransport(
     private var rxJob: Job? = null
 
     override suspend fun connect() {
+        // Not every reconnect routes through disconnect(): each screen calls
+        // connect() on demand, and OpComTransport.configureBus() can tear the
+        // link down internally. Without this, each such reconnect stacked
+        // another collector on the same incomingFrames, and every later frame
+        // was written to the log once per leaked collector (issue #45).
+        // Awaited rather than merely cancelled, so the old collector cannot
+        // still be in flight when the new sink is installed below.
+        rxJob?.cancelAndJoin()
+        closeSink()
         sessionStart = clock()
         sink = openSink()
         if (sink != null) {
