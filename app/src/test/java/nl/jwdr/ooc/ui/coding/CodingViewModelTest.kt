@@ -436,6 +436,42 @@ class CodingViewModelTest {
     }
 
     @Test
+    fun `a vehicle change mid-write is not shown until the orphaned write finishes`() = runTest(dispatcher) {
+        storeCatalog(
+            listOf(canEcu("UEC", 0x250, "UECKEY")),
+            listOf(codingFile("UECKEY", "UECKEY.0x1201.txt")),
+        )
+        val transport = slowWriteTransport(backgroundScope)
+        val viewModel = viewModel(transport)
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.selectEcu("UEC")
+        dispatcher.scheduler.advanceUntilIdle()
+        viewModel.editEntry(0x44, "AABB")
+        viewModel.requestWrite()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.confirmWrite()
+        // The write acks after 200 ms; at 100 ms it is still on the bus.
+        dispatcher.scheduler.advanceTimeBy(100)
+        assertEquals("precondition: only the initial read so far", 1, readCount(transport))
+
+        // Vehicle cleared mid-write. The collector cancels only the stale
+        // reporting; join() must hold the picker back until the NonCancellable
+        // batch actually finishes, so no second session can start meanwhile.
+        repository.selectVehicle(null)
+        dispatcher.scheduler.advanceTimeBy(50)
+        assertTrue(
+            "the screen must not advance while the orphaned write is still on the bus",
+            viewModel.state.value is CodingUiState.Entries,
+        )
+        assertEquals("no verification read until the write finishes", 1, readCount(transport))
+
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("the write's re-read still runs to completion", 2, readCount(transport))
+        assertEquals(CodingUiState.NoVehicle, viewModel.state.value)
+    }
+
+    @Test
     fun `editing a row clears its previous write outcome`() = runTest(dispatcher) {
         storeCatalog(
             listOf(canEcu("UEC", 0x250, "UECKEY")),

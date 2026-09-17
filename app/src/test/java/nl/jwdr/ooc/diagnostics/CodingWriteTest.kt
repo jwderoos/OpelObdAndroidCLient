@@ -118,6 +118,43 @@ class CodingWriteTest {
     }
 
     @Test
+    fun `a failed verification re-read is reported as unverified, not lost`() = runTest {
+        val table = CodingTable(
+            dataIdentifier = 0x1201,
+            didEntries = listOf(DidEntry(0x44, 2), DidEntry(0x4C, 2)),
+            rows = emptyList(),
+        )
+        val transport = FakeEcuTransport(backgroundScope)
+        // Both writes ack.
+        transport.onFrame(frame(0x250, 0x04, 0x3B, 0x44, 0xAA, 0xBB))
+            .respondWith(frame(0x650, 0x02, 0x7B, 0x44))
+        transport.onFrame(frame(0x250, 0x04, 0x3B, 0x4C, 0xCC, 0xDD))
+            .respondWith(frame(0x650, 0x02, 0x7B, 0x4C))
+        // Verification re-read: 0x44 confirms, but 0x4C's read is rejected
+        // (7F 1A 22) — the old code let this throw out of writeCoding and
+        // discard 0x44's already-known Written outcome (#38).
+        transport.onFrame(frame(0x250, 0x02, 0x1A, 0x44))
+            .respondWith(frame(0x650, 0x04, 0x5A, 0x44, 0xAA, 0xBB))
+        transport.onFrame(frame(0x250, 0x02, 0x1A, 0x4C))
+            .respondWith(frame(0x650, 0x03, 0x7F, 0x1A, 0x22))
+        transport.connect()
+        val manager = DiagnosticsManager(transport)
+
+        val result = manager.writeCoding(
+            uec,
+            table,
+            edits = mapOf(0x44 to bytes(0xAA, 0xBB), 0x4C to bytes(0xCC, 0xDD)),
+        )
+
+        val byId = result.outcomes.associateBy { it.id }
+        assertTrue("0x44's Written outcome must survive 0x4C's read failure", byId[0x44] is CodingEntryOutcome.Written)
+        val unverified = byId[0x4C] as CodingEntryOutcome.WriteUnverified
+        assertEquals(listOf<Byte>(0xCC.toByte(), 0xDD.toByte()), unverified.writtenBytes.toList())
+        // The entry that could be re-read is still returned for the UI refresh.
+        assertEquals(listOf(0x44), result.entries.map { it.id })
+    }
+
+    @Test
     fun `rejects an edit for an id the table doesn't define`() = runTest {
         val table = CodingTable(0x1201, listOf(DidEntry(0x44, 2)), emptyList())
         val manager = DiagnosticsManager(FakeEcuTransport(backgroundScope))

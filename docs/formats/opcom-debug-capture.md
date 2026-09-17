@@ -39,7 +39,7 @@ frame) and `0x7F` (keep-alive/status) arrive unsolicited.
 | `81` | PC→IF | 1 or 6 bytes | Bus parameters; 1 byte for HSCAN (`02`) and MSCAN (`06`), 6 for SWCAN (`08 04 3c 03 03 03`) — keyed on the preceding `20` select value(s), not per-bus-type; see issue #30, #40 |
 | `83` | PC→IF | slot(1) + CAN id (u32 LE) | Set RX filter slot 1–8; `FF FF FF FF` = slot off |
 | `71`,`72` | PC→IF | CAN id (u32 LE) + DLC + 8 data | Configure periodic message (tester present etc., sent by interface hardware — not visible as `90`/`91` records) |
-| `9F` | PC→IF | CAN id (u32 LE) + DLC + 8 data | Define cyclic TX message (seen carrying KWP `21 xx` local-id list on the engine ECU) |
+| `9F` | PC→IF | CAN id (u32 LE) + DLC + 8 data | ISO-TP Consecutive-Frame continuation of a multi-frame TX request, always following a `90` First Frame to the same id; acked by `DF <id-low> 00` (same convention as `90`'s `D0` ack). Only ever carries continuations of `3B` (WriteDataByIdentifier / coding writes) or `AA` (ReadDataByPacketIdentifier). Corrected from the earlier "define cyclic TX message" reading, which came from a small-sample gap (see #41 and OpelObdToolExploration `HANDOVER-C` §0a, 272/272 verified). The app sends it from `OpComFrameCodec` on PCI nibble `2`; **not yet verified against the clone dongle** — the clone may accept `90` for continuations too. |
 | `90` | PC→IF | CAN id (u32 **LE**) + DLC + 8 data | Transmit CAN frame; acked by `D0 <id-low> 00` |
 | `91` | IF→PC | CAN id (u32 **BE**) + DLC + 8 data | Received CAN frame (note the endianness flip vs `90`) |
 | `7F` | IF→PC | `7F 00` / `7F 7F` | Keep-alive/status |

@@ -323,18 +323,30 @@ class DiagnosticsManager(
                     outcomes[entry.id] = CodingEntryOutcome.Failed(entry.id, e.message ?: e.toString())
                 }
             }
-            val reread = table.didEntries.map { entry ->
-                CodingEntryRead(entry.id, session.execute(ReadECUIdentification(entry.id)).record)
+            // Re-read per entry, not as one all-or-nothing pass: a failed
+            // verification read (e.g. a transport timeout on one entry) must
+            // not discard the write-phase outcomes already computed above
+            // (#38). Reads that fail are recorded so their written entries
+            // become WriteUnverified rather than throwing out of writeCoding.
+            val reread = mutableListOf<CodingEntryRead>()
+            val rereadFailures = mutableMapOf<Int, String>()
+            for (entry in table.didEntries) {
+                try {
+                    reread += CodingEntryRead(entry.id, session.execute(ReadECUIdentification(entry.id)).record)
+                } catch (e: SessionException) {
+                    rereadFailures[entry.id] = e.message ?: e.toString()
+                }
             }
             val rereadById = reread.associateBy { it.id }
             for (id in edits.keys) {
                 if (outcomes.containsKey(id)) continue
                 val expected = edits.getValue(id)
-                val actual = rereadById.getValue(id).bytes
-                outcomes[id] = if (actual.contentEquals(expected)) {
-                    CodingEntryOutcome.Written(id, actual)
-                } else {
-                    CodingEntryOutcome.VerificationMismatch(id, expected, actual)
+                val actual = rereadById[id]?.bytes
+                outcomes[id] = when {
+                    actual == null ->
+                        CodingEntryOutcome.WriteUnverified(id, expected, rereadFailures[id] ?: "verification read failed")
+                    actual.contentEquals(expected) -> CodingEntryOutcome.Written(id, actual)
+                    else -> CodingEntryOutcome.VerificationMismatch(id, expected, actual)
                 }
             }
             CodingWriteResult(

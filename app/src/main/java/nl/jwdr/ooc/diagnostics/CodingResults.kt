@@ -25,6 +25,19 @@ sealed interface CodingEntryOutcome {
         val expected: ByteArray,
         val actual: ByteArray,
     ) : CodingEntryOutcome
+
+    /**
+     * The write acked, but its post-write re-read could not be performed (e.g.
+     * a transport timeout on the verification read), so what is now on the ECU
+     * is unconfirmed — [writtenBytes] is what was sent, not what was read back.
+     * Distinct from [VerificationMismatch] (read succeeded and disagreed) and
+     * from [Failed] (the write itself was rejected). See issue #38.
+     */
+    data class WriteUnverified(
+        override val id: Int,
+        val writtenBytes: ByteArray,
+        val reason: String,
+    ) : CodingEntryOutcome
 }
 
 /** Result of one [DiagnosticsManager.writeCoding] call. */

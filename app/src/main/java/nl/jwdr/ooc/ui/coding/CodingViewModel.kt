@@ -102,7 +102,16 @@ class CodingViewModel(
                 // must not resurrect a stale Entries state over the picker.
                 // The write itself is still atomic — confirmWrite runs the
                 // actual batch under NonCancellable.
+                //
+                // join() after cancel() is essential (#43): cancel only stops
+                // this now-stale UI's reporting, not the NonCancellable batch,
+                // which keeps writing on the transport. Awaiting it here means
+                // the picker/Entries state that would let the user start a
+                // *second* session on the same ECU is not shown until the
+                // orphaned write has actually finished on the bus, so two
+                // DiagnosticSessions can never overlap on one CAN-id pair.
                 writeJob?.cancel()
+                writeJob?.join()
                 currentDefinition = null
                 currentTable = null
                 if (summary == null || selected == null) {

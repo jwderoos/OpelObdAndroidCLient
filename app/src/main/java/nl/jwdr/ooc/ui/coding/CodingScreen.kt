@@ -285,6 +285,11 @@ private fun outcomeText(outcome: CodingEntryOutcome): String = when (outcome) {
         outcome.expected.joinToString("") { "%02X".format(it) },
         outcome.actual.joinToString("") { "%02X".format(it) },
     )
+    is CodingEntryOutcome.WriteUnverified -> stringResource(
+        R.string.coding_outcome_unverified,
+        outcome.writtenBytes.joinToString("") { "%02X".format(it) },
+        outcome.reason,
+    )
 }
 
 @Composable
